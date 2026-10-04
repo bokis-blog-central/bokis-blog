@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% from "_macros.html" import user_name %}
+{% block title %}Admin | {% endblock %}
+{% block content %}
+<div class="wrap page narrow">
+  <h1 class="page-title">Admin</h1>
+  <p class="muted">{{ stats.users }} users, {{ stats.posts }} posts, {{ stats.likes }} likes.</p>
+
+  <section class="admin-block" aria-labelledby="feat-title">
+    <h2 id="feat-title">Featured post of the week</h2>
+    <form method="post" action="{{ url_for('admin_featured') }}" class="stack" data-admin-search-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="field-group">
+        <label for="post-search">Search posts by title or author</label>
+        <input id="post-search" type="search" autocomplete="off" maxlength="100"
+               placeholder="Type at least two characters" data-admin-search
+               data-search-url="{{ url_for('search_admin_posts') }}"
+               value="{{ (featured_post.title ~ ' (by ' ~ featured_post.username ~ (' ★' if featured_post.crossword_star else '') ~ ')') if featured_post else '' }}"
+               aria-controls="post-results" aria-describedby="post-search-help">
+        <input id="post_id" name="post_id" type="hidden"
+               value="{{ featured_post.id if featured_post else '' }}" data-selected-id>
+        <p class="help" id="post-search-help">
+          {% if featured_post %}Selected: {{ featured_post.title }} (by {{ user_name(featured_post.username, featured_post.crossword_star) }})
+          {% else %}No featured post selected.{% endif %}
+        </p>
+        <ul class="search-results" id="post-results" data-search-results aria-live="polite"></ul>
+      </div>
+      <div class="actions">
+        <button class="button" type="submit">Save featured post</button>
+        <button class="button secondary" type="button" data-clear-selection>Clear selection</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="admin-block" id="crossword" aria-labelledby="crossword-title">
+    <h2 id="crossword-title">Weekly Bokword crossword</h2>
+    <p class="help">Enter Latin or Greek letters in answer cells and use # for blocked cells. To remove a block, focus its square and press Backspace or Delete; the empty square stays open so you can enter its answer letter. Clue starts and answer ends are determined by the grid. Changing the published puzzle clears its previous solver stars.</p>
+    <form method="post" action="{{ url_for('admin_save_crossword') }}" class="stack" data-admin-crossword-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="admin-crossword-grid" role="group" aria-label="15 by 15 crossword solution editor" data-admin-crossword-grid>
+        {% for row in range(15) %}
+          {% for col in range(15) %}
+            {% set value = crossword_rows[row][col] if crossword else '#' %}
+            <div class="admin-crossword-square" data-admin-crossword-square="{{ row * 15 + col }}">
+              <input class="admin-crossword-cell{% if value == '#' %} is-blocked{% endif %}"
+                     type="text" maxlength="1" value="{{ value if value != '#' else '#' }}"
+                     aria-label="Row {{ row + 1 }}, column {{ col + 1 }} (letter, blank open square, or # for blocked)"
+                     data-admin-crossword-cell>
+            </div>
+          {% endfor %}
+        {% endfor %}
+      </div>
+      <input type="hidden" name="grid" value="" data-crossword-solution>
+      <textarea name="clues" hidden data-crossword-clues>{{ crossword_clues|tojson if crossword else '{}' }}</textarea>
+      <div class="crossword-clue-editor">
+        <section><h3>Across hints</h3><div data-admin-across-clues></div></section>
+        <section><h3>Down hints</h3><div data-admin-down-clues></div></section>
+      </div>
+      <div class="actions">
+        <button class="button" type="submit">{{ 'Save crossword' if crossword else 'Publish crossword' }}</button>
+      </div>
+    </form>
+    {% if crossword %}
+      <form method="post" action="{{ url_for('admin_reset_crossword') }}" class="actions crossword-reset-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="button danger" type="submit">Reset grid to # and unpublish</button>
+      </form>
+      <p class="help">Reset saves an empty grid of blocked cells, unpublishes the puzzle, and clears all solver stars.</p>
+    {% endif %}
+  </section>
+
+  <section class="admin-block" aria-labelledby="pw-title">
+    <h2 id="pw-title">Signup password</h2>
+    <p class="help">New visitors need this password before they can see the sign-up form. Share it only with people you want to invite.</p>
+    <form method="post" action="{{ url_for('admin_signup_password') }}" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="field-group">
+        <label for="new_password">New signup password</label>
+        <input id="new_password" name="new_password" type="password" minlength="8" autocomplete="off" required>
+      </div>
+      <div class="field-group">
+        <label for="confirm">Repeat it</label>
+        <input id="confirm" name="confirm" type="password" minlength="8" autocomplete="off" required>
+      </div>
+      <div class="actions"><button class="button" type="submit">Change signup password</button></div>
+    </form>
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Sign up | {% endblock %}
+{% block content %}
+<div class="wrap page narrow">
+  <h1 class="page-title">Sign up</h1>
+
+  {% if not unlocked %}
+    <p class="intro">Sign-ups are protected to keep bots out. Enter the signup password you were given to continue.</p>
+    <form method="post" action="{{ url_for('signup_unlock') }}" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="field-group">
+        <label for="signup_password">Signup password</label>
+        <input id="signup_password" name="signup_password" type="password" autocomplete="off" required autofocus>
+      </div>
+      <div class="actions">
+        <button class="button" type="submit">Continue</button>
+        <a href="{{ url_for('login') }}">I already have an account</a>
+      </div>
+    </form>
+  {% else %}
+    {% if errors %}
+      <ul class="errors" role="alert">{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+    {% endif %}
+    <form method="post" action="{{ url_for('signup_create') }}" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="field-group">
+        <label for="username">Username</label>
+        <input id="username" name="username" type="text" value="{{ form.username }}" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]+" autocomplete="username" required autofocus aria-describedby="username-help">
+        <p class="help" id="username-help">3 to 24 letters, numbers or underscores. Everyone can see it.</p>
+      </div>
+      <div class="field-group">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" minlength="8" maxlength="128" autocomplete="new-password" required aria-describedby="pw-help">
+        <p class="help" id="pw-help">At least 8 characters.</p>
+      </div>
+      <div class="field-group">
+        <label for="confirm">Repeat password</label>
+        <input id="confirm" name="confirm" type="password" minlength="8" maxlength="128" autocomplete="new-password" required>
+      </div>
+      <div class="actions">
+        <button class="button" type="submit">Create account</button>
+      </div>
+    </form>
+  {% endif %}
+</div>
+{% endblock %}

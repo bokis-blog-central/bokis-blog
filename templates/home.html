@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% from "_macros.html" import like_button with context %}
+{% from "_macros.html" import user_name %}
+{% block content %}
+
+<!-- Featured post of the week (chosen by Boki) -->
+<section class="featured" aria-labelledby="featured-title">
+  <div class="wrap">
+    {% if featured %}
+      <p class="section-note">Featured this week</p>
+      <h1 id="featured-title"><a href="{{ url_for('post', post_id=featured.id) }}">{{ featured.title }}</a></h1>
+      <p class="lede">{{ featured.body|excerpt(260) }}</p>
+      <ul class="meta">
+        <li>by <a href="{{ url_for('profile', username=featured.username) }}">{{ user_name(featured.username, featured.crossword_star) }}</a></li>
+        <li><time datetime="{{ featured.created_at|iso }}">{{ featured.created_at|date }}</time></li>
+        <li>{{ featured.body|wordcount }} {{ 'word' if (featured.body|wordcount) == 1 else 'words' }}</li>
+        <li>{{ like_button(featured, '/') }}</li>
+      </ul>
+    {% else %}
+      <h1 id="featured-title">Nothing is featured yet</h1>
+      <p class="lede">
+        {% if g.user and g.user.is_admin %}
+          Pick this week's featured post on the <a href="{{ url_for('admin') }}">Admin page</a>.
+        {% else %}
+          Boki picks one standout post each week. Meanwhile, <a href="{{ url_for('explore') }}">explore what people are writing</a>.
+        {% endif %}
+      </p>
+    {% endif %}
+  </div>
+</section>
+
+<div class="wrap home-sections">
+  <section class="bokword" aria-labelledby="bokword-title">
+    <h2 class="section-title" id="bokword-title">Solve the Weekly Bokword for a star next to your name</h2>
+    {% if crossword %}
+      <div class="bokword-board" data-crossword-board>
+        <div class="crossword-layout">
+          <div class="crossword-grid" role="group" aria-label="Weekly Bokword crossword grid">
+            {% for index in range(225) %}
+              {% set row = index // 15 %}
+              {% set col = index % 15 %}
+              {% if crossword.solution[index] != '#' %}
+                {% set starts = crossword_entries
+                  |selectattr('row', 'equalto', row)
+                  |selectattr('col', 'equalto', col)
+                  |list %}
+                <label class="crossword-square{% if crossword_completed %} is-revealed{% endif %}"
+                       aria-label="Row {{ row + 1 }}, column {{ col + 1 }}"
+                       data-crossword-square="{{ index }}"
+                       data-row="{{ row + 1 }}" data-col="{{ col + 1 }}"
+                       style="grid-row: {{ row + 1 }}; grid-column: {{ col + 1 }};">
+                  {% if starts %}
+                    <small data-crossword-start-number="{{ index }}">{{ starts|map(attribute='number')|join('/') }}</small>
+                  {% endif %}
+                  {% if not crossword_completed %}
+                    <input class="crossword-cell" type="text" maxlength="1" autocomplete="off"
+                           data-crossword-cell="{{ index }}">
+                  {% else %}
+                    <span aria-hidden="true">{{ crossword_answers[index] }}</span>
+                  {% endif %}
+                </label>
+              {% else %}
+                <div class="crossword-square is-blocked" aria-hidden="true"
+                     style="grid-row: {{ row + 1 }}; grid-column: {{ col + 1 }};"></div>
+              {% endif %}
+            {% endfor %}
+          </div>
+          <div class="crossword-clues">
+            {% for direction in ['across', 'down'] %}
+              <section>
+                <h3>{{ direction|capitalize }}</h3>
+                <ol>
+                  {% for clue in crossword_entries if clue.direction == direction %}
+                    <li data-crossword-entry data-direction="{{ clue.direction }}"
+                        data-row="{{ clue.row }}" data-col="{{ clue.col }}">
+                      <span class="crossword-clue-number">{{ clue.number }}.</span> {{ clue.hint }}
+                      <span class="crossword-answer-length">({{ clue.length }})</span>
+                    </li>
+                  {% endfor %}
+                </ol>
+              </section>
+            {% endfor %}
+          </div>
+        </div>
+        {% if g.user %}
+          {% if crossword_completed %}
+            <p class="crossword-complete" role="status">Puzzle solved — you earned a <span class="achievement-star" aria-hidden="true">★</span> by your name!</p>
+          {% else %}
+            <form class="crossword-solve-form" method="post" action="{{ url_for('solve_crossword') }}" data-crossword-solve-form>
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="guess" value="" data-crossword-guess>
+              <button class="button" type="submit">Check answers</button>
+              <p class="crossword-status" aria-live="polite" data-crossword-status></p>
+            </form>
+          {% endif %}
+        {% else %}
+          <p class="help"><a href="{{ url_for('login', next=url_for('home') ~ '#bokword') }}">Log in</a> to solve the puzzle and earn a star by your name.</p>
+        {% endif %}
+      </div>
+    {% else %}
+      <div class="bokword-placeholder">
+        <p>Boki is preparing this week&rsquo;s crossword.</p>
+        {% if g.user and g.user.is_admin %}<p><a href="{{ url_for('admin') }}#crossword">Create the Weekly Bokword puzzle</a></p>{% endif %}
+      </div>
+    {% endif %}
+  </section>
+
+  <section aria-labelledby="top-title">
+    <h2 class="section-title" id="top-title">Most liked this week</h2>
+    {% if top_week %}
+      <ol class="ranked top-week-grid">
+        {% for p in top_week %}
+          <li class="top-week-card">
+            <div class="top-week-heading">
+              <h3><a href="{{ url_for('post', post_id=p.id) }}">{{ p.title }}</a></h3>
+              {% if g.user %}
+                <form class="inline-form" method="post" action="{{ url_for('toggle_like', post_id=p.id) }}">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="next" value="/">
+                  <button class="like {% if p.liked %}is-liked{% endif %}" type="submit" aria-pressed="{{ 'true' if p.liked else 'false' }}" aria-label="{{ 'Unlike' if p.liked else 'Like' }} {{ p.title }}">
+                    <span aria-hidden="true">{{ '♥' if p.liked else '♡' }}</span>
+                  </button>
+                </form>
+              {% else %}
+                <a class="like" href="{{ url_for('login', next=url_for('home')) }}" aria-label="Log in to like {{ p.title }}"><span aria-hidden="true">♡</span></a>
+              {% endif %}
+            </div>
+            <div class="top-week-byline">
+              <span>by <a href="{{ url_for('profile', username=p.username) }}">{{ user_name(p.username, p.crossword_star) }}</a></span>
+              <time datetime="{{ p.created_at|iso }}">{{ p.created_at|date }}</time>
+            </div>
+            <p class="top-week-count">{{ p.week_likes }} {{ 'like' if p.week_likes == 1 else 'likes' }} this week</p>
+          </li>
+        {% endfor %}
+      </ol>
+    {% else %}
+      <p class="empty">No posts have been liked in the last 7 days. <a href="{{ url_for('explore') }}">Find one to like</a>.</p>
+    {% endif %}
+  </section>
+
+  <section aria-labelledby="admin-post-title">
+    {% if latest_admin_post %}
+      <h2 class="section-title" id="admin-post-title">Latest post from Boki</h2>
+      <article class="admin-latest-post">
+        <h3><a href="{{ url_for('post', post_id=latest_admin_post.id) }}">{{ latest_admin_post.title }}</a></h3>
+        <p>{{ latest_admin_post.body|excerpt(320) }}</p>
+        <ul class="meta">
+          <li>by <a href="{{ url_for('profile', username=latest_admin_post.username) }}">{{ user_name(latest_admin_post.username, latest_admin_post.crossword_star) }}</a></li>
+          <li><time datetime="{{ latest_admin_post.created_at|iso }}">{{ latest_admin_post.created_at|date }}</time></li>
+          <li>{{ latest_admin_post.body|wordcount }} {{ 'word' if (latest_admin_post.body|wordcount) == 1 else 'words' }}</li>
+          <li>{{ like_button(latest_admin_post, '/') }}</li>
+        </ul>
+      </article>
+    {% else %}
+      <h2 class="section-title" id="admin-post-title">Latest post from Boki</h2>
+      <p class="empty">No admin account has published a post yet.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

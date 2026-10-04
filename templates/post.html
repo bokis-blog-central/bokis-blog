@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% from "_macros.html" import like_button with context %}
+{% from "_macros.html" import user_name %}
+{% block title %}{{ post.title }} | {% endblock %}
+{% block page_theme %}--bg: {{ post.background_color }}; --ink: {{ post.text_color }}; --ink-soft: {{ post.text_color }}; --post-title-color: {{ post.title_color }}; color: {{ post.text_color }};{% endblock %}
+{% block content %}
+<article class="wrap">
+  <header class="article-header">
+    <h1 class="post-title">{{ post.title }}</h1>
+    <ul class="meta">
+      <li>by <a href="{{ url_for('profile', username=post.username) }}">{{ user_name(post.username, post.crossword_star) }}</a></li>
+      <li><time datetime="{{ post.created_at|iso }}">{{ post.created_at|date }}</time></li>
+      {% if post.updated_at %}<li>edited {{ post.updated_at|date }}</li>{% endif %}
+      <li>{{ post.body|wordcount }} {{ 'word' if (post.body|wordcount) == 1 else 'words' }}</li>
+      {% if is_featured %}<li><span class="tag">Featured this week</span></li>{% endif %}
+    </ul>
+  </header>
+
+  {% if post.image %}
+    <img class="article-image" src="{{ url_for('uploaded_file', filename=post.image) }}" alt="Image for {{ post.title }}">
+  {% endif %}
+  <div class="article-body post-content">{{ post.body|paragraphs }}</div>
+
+  <div class="article-actions">
+    {{ like_button(post, url_for('post', post_id=post.id)) }}
+
+    {% if g.user and g.user.id == post.user_id %}
+      <a class="button secondary" href="{{ url_for('edit_post', post_id=post.id) }}">Edit</a>
+    {% endif %}
+
+    {% if g.user and (g.user.id == post.user_id or g.user.is_admin) %}
+      <form class="inline-form" method="post" action="{{ url_for('delete_post', post_id=post.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="button danger" type="submit">Delete</button>
+      </form>
+    {% endif %}
+
+    {% if g.user and g.user.is_admin and not is_featured %}
+      <form class="inline-form" method="post" action="{{ url_for('admin_featured') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="post_id" value="{{ post.id }}">
+        <input type="hidden" name="next" value="{{ url_for('post', post_id=post.id) }}">
+        <button class="button secondary" type="submit">Feature this post</button>
+      </form>
+    {% endif %}
+  </div>
+
+  <div class="author-box">
+    {% if post.author_avatar %}
+      <img class="avatar" src="{{ url_for('uploaded_file', filename=post.author_avatar) }}" alt="{{ post.username }} profile picture" style="object-position: {{ post.author_avatar_x }}% {{ post.author_avatar_y }}%;">
+    {% else %}
+      <div class="avatar" aria-hidden="true">{{ post.username[:2]|upper }}</div>
+    {% endif %}
+    <p><strong>{{ user_name(post.username, post.crossword_star) }}</strong><br>
+      <a href="{{ url_for('profile', username=post.username) }}">See all posts by {{ user_name(post.username, post.crossword_star) }}</a></p>
+  </div>
+
+  <details class="comments" id="comments" open>
+    <summary class="comments-summary">
+      <span class="comments-inner">Comments ({{ comments|length }})</span>
+    </summary>
+    <div class="comments-inner comments-content">
+      {% if g.user %}
+        <form method="post" action="{{ url_for('add_comment', post_id=post.id) }}" class="stack comment-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="field-group">
+            <label for="comment-body">Share your thoughts</label>
+            <textarea id="comment-body" name="body" rows="4" maxlength="3000" required></textarea>
+          </div>
+          <div class="actions"><button class="button" type="submit">Add comment</button></div>
+        </form>
+      {% else %}
+        <p class="muted"><a href="{{ url_for('login', next=url_for('post', post_id=post.id) ~ '#comments') }}">Log in</a> to leave a comment.</p>
+      {% endif %}
+      {% if comments %}
+        <ol class="comment-list">
+          {% for comment in comments %}
+            <li class="comment">
+              {% if comment.avatar %}
+                <img class="avatar small" src="{{ url_for('uploaded_file', filename=comment.avatar) }}" alt="" style="object-position: {{ comment.avatar_position_x }}% {{ comment.avatar_position_y }}%;">
+              {% else %}
+                <span class="avatar small" aria-hidden="true">{{ comment.username[:2]|upper }}</span>
+              {% endif %}
+              <div>
+                <p class="comment-meta"><a href="{{ url_for('profile', username=comment.username) }}">{{ user_name(comment.username, comment.crossword_star) }}</a> · <time datetime="{{ comment.created_at|iso }}">{{ comment.created_at|date }}</time></p>
+                <div class="comment-body">{{ comment.body|paragraphs }}</div>
+              </div>
+            </li>
+          {% endfor %}
+        </ol>
+      {% else %}
+        <p class="empty">No comments yet. Start the conversation.</p>
+      {% endif %}
+    </div>
+  </details>
+</article>
+{% endblock %}

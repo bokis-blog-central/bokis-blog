@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% from "_macros.html" import post_row, pager with context %}
+{% from "_macros.html" import user_name %}
+{% block title %}Explore | {% endblock %}
+{% block content %}
+<div class="wrap page">
+  <h1 class="page-title">Explore</h1>
+
+  <form class="search" method="get" action="{{ url_for('explore') }}" role="search">
+    <label class="sr" for="q">Search posts and users</label>
+    <input id="q" name="q" type="search" value="{{ q }}" placeholder="Search posts or users" maxlength="100" autocomplete="off">
+    <label class="sr" for="type">Search in</label>
+    <select id="type" name="type">
+      <option value="all" {% if kind == 'all' %}selected{% endif %}>Posts and users</option>
+      <option value="posts" {% if kind == 'posts' %}selected{% endif %}>Posts only</option>
+      <option value="users" {% if kind == 'users' %}selected{% endif %}>Users only</option>
+    </select>
+    <label class="sr" for="sort">Sort posts</label>
+    <select id="sort" name="sort">
+      <option value="new" {% if sort == 'new' %}selected{% endif %}>Newest first</option>
+      <option value="liked" {% if sort == 'liked' %}selected{% endif %}>Most liked</option>
+    </select>
+    <button class="button" type="submit">Search</button>
+  </form>
+
+  {% set next = request.full_path.rstrip('?') %}
+
+  {% if q %}
+    {% if kind in ('all', 'users') %}
+      <section aria-labelledby="users-title">
+        <h2 class="section-title" id="users-title">Users</h2>
+        {% if users %}
+          <ul class="user-list">
+            {% for u in users %}
+              <li>
+                <span class="avatar small" aria-hidden="true">{{ u.username[:2]|upper }}</span>
+                <div>
+                  <a href="{{ url_for('profile', username=u.username) }}">{{ user_name(u.username, u.crossword_star) }}</a>
+                  <span class="muted">{{ u.post_count }} {{ 'post' if u.post_count == 1 else 'posts' }}, joined {{ u.created_at|date }}</span>
+                </div>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="empty">No users match &ldquo;{{ q }}&rdquo;.</p>
+        {% endif %}
+      </section>
+    {% endif %}
+
+    {% if kind in ('all', 'posts') %}
+      <section aria-labelledby="posts-title">
+        <h2 class="section-title" id="posts-title">Posts ({{ total }})</h2>
+        {% if posts %}
+          <ol class="post-list">{% for p in posts %}{{ post_row(p, next) }}{% endfor %}</ol>
+          {{ pager('explore', page, pages, {'q': q, 'type': kind, 'sort': sort}) }}
+        {% else %}
+          <p class="empty">No posts match &ldquo;{{ q }}&rdquo;. Try fewer or different words.</p>
+        {% endif %}
+      </section>
+    {% endif %}
+  {% else %}
+    {% if kind in ('all', 'users') %}
+      <section aria-labelledby="users-title">
+        <h2 class="section-title" id="users-title">Users</h2>
+        {% if users %}
+          <ul class="user-list">
+            {% for u in users %}
+              <li>
+                <span class="avatar small" aria-hidden="true">{{ u.username[:2]|upper }}</span>
+                <div>
+                  <a href="{{ url_for('profile', username=u.username) }}">{{ user_name(u.username, u.crossword_star) }}</a>
+                  <span class="muted">{{ u.post_count }} {{ 'post' if u.post_count == 1 else 'posts' }}, joined {{ u.created_at|date }}</span>
+                </div>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="empty">No users have joined yet.</p>
+        {% endif %}
+      </section>
+    {% endif %}
+
+    {% if kind in ('all', 'posts') %}
+      <section aria-labelledby="all-title">
+        <h2 class="section-title" id="all-title">All posts ({{ total }})</h2>
+        {% if posts %}
+          <ol class="post-list">{% for p in posts %}{{ post_row(p, next) }}{% endfor %}</ol>
+          {{ pager('explore', page, pages, {'sort': sort}) }}
+        {% else %}
+          <p class="empty">Nothing has been published yet.</p>
+        {% endif %}
+      </section>
+    {% endif %}
+  {% endif %}
+</div>
+{% endblock %}

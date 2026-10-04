@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% from "_macros.html" import post_row, pager with context %}
+{% from "_macros.html" import user_name %}
+{% block title %}{{ profile_user.username }} | {% endblock %}
+{% block page_theme %}--bg: {{ profile_user.profile_bg }}; --profile-text: {{ profile_user.profile_text }}; --ink: {{ profile_user.profile_text }}; --ink-soft: {{ profile_user.profile_text }}; --accent: {{ profile_user.profile_text }}; color: {{ profile_user.profile_text }};{% endblock %}
+{% block content %}
+<div class="wrap page profile-page">
+  <header class="profile-head">
+    {% if profile_user.avatar %}
+      <img class="avatar big" src="{{ url_for('uploaded_file', filename=profile_user.avatar) }}" alt="{{ profile_user.username }} profile picture" style="object-position: {{ profile_user.avatar_position_x }}% {{ profile_user.avatar_position_y }}%;">
+    {% else %}
+      <div class="avatar big" aria-hidden="true">{{ profile_user.username[:2]|upper }}</div>
+    {% endif %}
+    <div>
+      <h1 class="page-title">{{ user_name(profile_user.username, profile_user.crossword_star) }}</h1>
+      <p class="muted">Joined {{ profile_user.created_at|date }}. {{ total }} {{ 'post' if total == 1 else 'posts' }}, {{ total_likes }} {{ 'like' if total_likes == 1 else 'likes' }} received.</p>
+      {% if profile_user.bio %}<p class="profile-bio">{{ profile_user.bio }}</p>{% endif %}
+    </div>
+  </header>
+
+  {% set next = request.full_path.rstrip('?') %}
+  {% if posts %}
+    <ol class="post-list">{% for p in posts %}{{ post_row(p, next) }}{% endfor %}</ol>
+    {{ pager('profile', page, pages, {'username': profile_user.username}) }}
+  {% else %}
+    <p class="empty">
+      {{ user_name(profile_user.username, profile_user.crossword_star) }} has not published anything yet.
+      {% if g.user and g.user.id == profile_user.id %}<a href="{{ url_for('new_post') }}">Write your first post</a>.{% endif %}
+    </p>
+  {% endif %}
+</div>
+{% endblock %}

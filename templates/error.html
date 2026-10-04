@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ code }} | {% endblock %}
+{% block content %}
+<div class="wrap page narrow">
+  <h1 class="page-title">{{ code }}</h1>
+  <p class="intro">{{ message }}</p>
+  <p><a href="{{ url_for('home') }}">Back to the home page</a></p>
+</div>
+{% endblock %}

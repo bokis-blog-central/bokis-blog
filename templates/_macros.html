@@ -1,0 +1,51 @@
+{% macro like_button(post, next) %}
+  {% if g.user %}
+    <form class="inline-form" method="post" action="{{ url_for('toggle_like', post_id=post.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="next" value="{{ next }}">
+      <button class="like {% if post.liked %}is-liked{% endif %}" type="submit" aria-pressed="{{ 'true' if post.liked else 'false' }}">
+        <span aria-hidden="true">{{ '♥' if post.liked else '♡' }}</span>
+        {{ post.like_count }}
+        <span class="sr">{{ 'like' if post.like_count == 1 else 'likes' }}, {{ 'unlike' if post.liked else 'like this post' }}</span>
+      </button>
+    </form>
+  {% else %}
+    <a class="like" href="{{ url_for('login', next=next) }}">
+      <span aria-hidden="true">♡</span> {{ post.like_count }}
+      <span class="sr">{{ 'like' if post.like_count == 1 else 'likes' }}, log in to like</span>
+    </a>
+  {% endif %}
+{% endmacro %}
+
+{% macro user_name(username, crossword_star=false) %}
+  {{ username }}{% if crossword_star %}<span class="achievement-star" role="img" aria-label="Solved the current Weekly Bokword" title="Solved the current Weekly Bokword">★</span>{% endif %}
+{% endmacro %}
+
+{% macro post_row(post, next) %}
+  <li class="post-item">
+    <time datetime="{{ post.created_at|iso }}">{{ post.created_at|date }}</time>
+    <div>
+      <h3><a href="{{ url_for('post', post_id=post.id) }}">{{ post.title }}</a></h3>
+      <p>{{ post.body|excerpt }}</p>
+      <ul class="meta">
+        <li>by <a href="{{ url_for('profile', username=post.username) }}">{{ user_name(post.username, post.crossword_star) }}</a></li>
+        <li>{{ post.body|wordcount }} {{ 'word' if (post.body|wordcount) == 1 else 'words' }}</li>
+        <li>{{ like_button(post, next) }}</li>
+      </ul>
+    </div>
+  </li>
+{% endmacro %}
+
+{% macro pager(endpoint, page, pages, args) %}
+  {% if pages > 1 %}
+    <nav class="pagination" aria-label="Pagination">
+      {% if page > 1 %}
+        <a href="{{ url_for(endpoint, page=page - 1, **args) }}" rel="prev">Newer</a>
+      {% else %}<span></span>{% endif %}
+      <span>Page {{ page }} of {{ pages }}</span>
+      {% if page < pages %}
+        <a href="{{ url_for(endpoint, page=page + 1, **args) }}" rel="next">Older</a>
+      {% else %}<span></span>{% endif %}
+    </nav>
+  {% endif %}
+{% endmacro %}

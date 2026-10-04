@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+{% from "_macros.html" import user_name %}
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{% endblock %}{{ site_name }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Literata:ital,opsz,wght@0,7..72,400..700;1,7..72,400..700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v='26') }}">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="wrap">
+      <a class="site-title" href="{{ url_for('home') }}">{{ site_name }}</a>
+      <nav class="site-nav" aria-label="Main">
+        <ul>
+          <li><a href="{{ url_for('home') }}" {% if request.endpoint == 'home' %}aria-current="page"{% endif %}>Home</a></li>
+          <li><a href="{{ url_for('explore') }}" {% if request.endpoint == 'explore' %}aria-current="page"{% endif %}>Explore</a></li>
+          {% if g.user %}
+            <li><a href="{{ url_for('new_post') }}" {% if request.endpoint == 'new_post' %}aria-current="page"{% endif %}>Write</a></li>
+            <li><a href="{{ url_for('profile', username=g.user.username) }}">{{ user_name(g.user.username, g.user.crossword_star) }}</a></li>
+            <li><a href="{{ url_for('account_settings') }}" {% if request.endpoint == 'account_settings' %}aria-current="page"{% endif %}>Settings</a></li>
+            {% if g.user.is_admin %}
+              <li><a href="{{ url_for('admin') }}" {% if request.endpoint == 'admin' %}aria-current="page"{% endif %}>Admin</a></li>
+            {% endif %}
+            <li>
+              <form method="post" action="{{ url_for('logout') }}" class="inline-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="link-button">Log out</button>
+              </form>
+            </li>
+          {% else %}
+            <li><a href="{{ url_for('login') }}" {% if request.endpoint == 'login' %}aria-current="page"{% endif %}>Log in</a></li>
+            <li><a class="nav-cta" href="{{ url_for('signup') }}">Sign up</a></li>
+          {% endif %}
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main" style="{% block page_theme %}{% endblock %}">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="wrap flashes" role="status">
+          {% for category, message in messages %}
+            <p class="flash flash-{{ category }}">{{ message }}</p>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <p>{{ site_name }}</p>
+      <ul>
+        <li><a href="{{ url_for('explore') }}">Explore</a></li>
+        {% if not g.user %}<li><a href="{{ url_for('signup') }}">Sign up</a></li>{% endif %}
+      </ul>
+    </div>
+  </footer>
+  <script src="{{ url_for('static', filename='app.js', v='21') }}" defer></script>
+</body>
+</html>
