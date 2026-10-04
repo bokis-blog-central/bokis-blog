@@ -21,7 +21,8 @@ from markupsafe import Markup, escape
 from werkzeug.security import check_password_hash, generate_password_hash
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-INSTANCE_DIR = os.path.join(BASE_DIR, "instance")
+INSTANCE_DIR = os.environ.get(
+    "BLOG_DATA_DIR", os.path.join(BASE_DIR, "instance"))
 UPLOAD_DIR = os.path.join(INSTANCE_DIR, "uploads")
 os.makedirs(INSTANCE_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -45,48 +46,11 @@ IMAGE_SIGNATURES = (
 # ----------------------------------------------------------------------
 
 def load_secret_key():
-    """Load the cookie-signing key or create one in the persistent instance directory."""
+    """Return the configured cookie-signing key after validating its length."""
     key = os.environ.get("SECRET_KEY")
-    if key is not None:
-        if len(key.encode("utf-8")) < 32:
-            raise RuntimeError("SECRET_KEY must be at least 32 bytes.")
-        return key
-
-    if os.name == "nt":
-        config_dir = os.environ.get("LOCALAPPDATA")
-        if not config_dir:
-            config_dir = os.path.join(
-                os.path.expanduser("~"), "AppData", "Local")
-    else:
-        config_dir = os.environ.get(
-            "XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config"))
-    legacy_key_path = os.path.join(config_dir, "Boki.blog", "secret_key")
-    key_path = os.environ.get(
-        "SECRET_KEY_FILE", os.path.join(INSTANCE_DIR, "secret_key"))
-    os.makedirs(os.path.dirname(os.path.abspath(key_path)), mode=0o700, exist_ok=True)
-
-    try:
-        with open(key_path, encoding="ascii") as key_file:
-            key = key_file.read().strip()
-    except FileNotFoundError:
-        try:
-            with open(legacy_key_path, encoding="ascii") as key_file:
-                key = key_file.read().strip()
-        except FileNotFoundError:
-            key = secrets.token_hex(32)
-        try:
-            fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        except FileExistsError:
-            with open(key_path, encoding="ascii") as key_file:
-                key = key_file.read().strip()
-        else:
-            with os.fdopen(fd, "w", encoding="ascii") as key_file:
-                key_file.write(key)
-                key_file.flush()
-                os.fsync(key_file.fileno())
-
-    if len(key.encode("utf-8")) < 32:
-        raise RuntimeError(f"The signing key in {key_path} is invalid.")
+    if not key or len(key.encode("utf-8")) < 32:
+        raise RuntimeError(
+            "Set SECRET_KEY to a value of at least 32 bytes in the environment.")
     return key
 
 

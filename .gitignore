@@ -1,1 +1,2 @@
-instance/secret_key
+.env*
+!.env.example

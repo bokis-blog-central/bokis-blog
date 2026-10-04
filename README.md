@@ -32,7 +32,7 @@ python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-# Choose the signup password (optional; a random one is printed on first run if you skip this)
+# Optional: override the initial signup password configured in .env
 export SIGNUP_PASSWORD="pick-something-long"     # Windows PowerShell: $env:SIGNUP_PASSWORD="..."
 
 # Create your admin account
@@ -44,16 +44,10 @@ flask --app app run
 
 Open http://127.0.0.1:5000.
 
-When `SECRET_KEY` is not set, the app loads or generates a key at
-`instance/secret_key`. This file is ignored by Git. Keep it with the database and
-uploads when moving or backing up an installation. Existing installations keep
-using their key from the user's configuration directory when it is available.
-For a hosted deployment, keep `instance/` on persistent storage or configure
-`SECRET_KEY` in the deployment environment or secret manager (recommended);
-`python generate_secret_key.py` can generate a value for this purpose. Do not
-commit the key to the codebase.
-Changing it invalidates existing login sessions. User passwords are stored as salted,
-one-way hashes and do not use `SECRET_KEY` for encryption.
+Flask's CLI loads variables from `.env` when `python-dotenv` is installed.
+`SECRET_KEY` is required and must be at least 32 bytes; keep it out of Git.
+Changing it invalidates existing login sessions. User passwords are stored as
+salted, one-way hashes and do not use `SECRET_KEY` for encryption.
 Email addresses are no longer collected; upgrading an existing database removes
 its email column and the values it contained.
 
@@ -66,19 +60,25 @@ Do not use it on a real site.
 | Variable | What it does |
 | --- | --- |
 | `SIGNUP_PASSWORD` | Initial signup password. Only read the first time the database is created. Change it later on the Admin page. |
-| `SECRET_KEY` | Optional locally; if unset, a 256-bit key is generated in `instance/`. For hosted deployments, set a stable value of at least 32 bytes using the runtime environment or a secret manager. |
-| `SECRET_KEY_FILE` | Optional path for the persistent key file used when `SECRET_KEY` is not set. Default: `instance/secret_key`. |
+| `SECRET_KEY` | Required, stable cookie-signing key of at least 32 bytes. Set locally in `.env` and in Render's environment settings. |
 | `SITE_NAME` | Name shown in the header. Default: Boki.blog. |
-| `BLOG_DB` | Path to the SQLite file. Default: `instance/blog.db`. |
+| `BLOG_DATA_DIR` | Directory for the database and uploads. Default: `instance/`; set to `/var/data` when deploying with the included Render disk. |
+| `BLOG_DB` | Optional explicit path to the SQLite file. Default: `<BLOG_DATA_DIR>/blog.db`. |
 | `BLOG_HTTPS` | Set to `1` when serving over HTTPS so cookies are marked secure. |
 
 ## Putting it online
 
-`flask run` is for development. For a real site, serve it with a production server
-such as gunicorn (`pip install gunicorn`, then `gunicorn app:app`) behind HTTPS, and set
-`BLOG_HTTPS=1`. Back up the database and uploads in `instance/`; make sure its
-storage is persistent if relying on the generated key, or keep `SECRET_KEY`
-separately in your deployment's secret manager.
+The included `render.yaml` configures a paid Render web service, Gunicorn, HTTPS
+cookies, and a persistent disk at `/var/data` for the SQLite database and uploaded
+images. Connect the repository to Render as a Blueprint. When prompted, enter the
+`SECRET_KEY` and `SIGNUP_PASSWORD` values from your local `.env`; Render stores
+these as service environment variables. Do not commit `.env`.
+
+After the first deploy, open the service Shell and run
+`flask --app app create-admin yourname` to create the admin account. The service
+starts with a new database on its persistent disk. If you need to bring over
+existing local posts or images, copy the local database and `instance/uploads/`
+into the mounted `/var/data` disk before creating the admin account.
 
 The log-in and signup-password throttling is kept in memory and per process, which is
 fine for a small site on one process.
@@ -90,6 +90,6 @@ fine for a small site on one process.
 - `static/style.css`: colors and fonts are at the top
 - `static/app.js`: synchronizes color pickers, avatar framing, and crossword editing/solving
 
-User-uploaded profile and post images are stored in `instance/uploads/`. Supported
-formats are PNG, JPEG, GIF and WebP, with a 5 MB limit per image. Back up this
-directory along with the database.
+User-uploaded profile and post images are stored in
+`<BLOG_DATA_DIR>/uploads/`. Supported formats are PNG, JPEG, GIF and WebP, with
+a 5 MB limit per image. Back up this directory along with the database.
