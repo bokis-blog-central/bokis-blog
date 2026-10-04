@@ -45,7 +45,7 @@ IMAGE_SIGNATURES = (
 # ----------------------------------------------------------------------
 
 def load_secret_key():
-    """Load the cookie-signing key or create a persistent key outside the project."""
+    """Load the cookie-signing key or create one in the persistent instance directory."""
     key = os.environ.get("SECRET_KEY")
     if key is not None:
         if len(key.encode("utf-8")) < 32:
@@ -60,14 +60,20 @@ def load_secret_key():
     else:
         config_dir = os.environ.get(
             "XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config"))
-    key_path = os.path.join(config_dir, "Boki.blog", "secret_key")
-    os.makedirs(os.path.dirname(key_path), mode=0o700, exist_ok=True)
+    legacy_key_path = os.path.join(config_dir, "Boki.blog", "secret_key")
+    key_path = os.environ.get(
+        "SECRET_KEY_FILE", os.path.join(INSTANCE_DIR, "secret_key"))
+    os.makedirs(os.path.dirname(os.path.abspath(key_path)), mode=0o700, exist_ok=True)
 
     try:
         with open(key_path, encoding="ascii") as key_file:
             key = key_file.read().strip()
     except FileNotFoundError:
-        key = secrets.token_hex(32)
+        try:
+            with open(legacy_key_path, encoding="ascii") as key_file:
+                key = key_file.read().strip()
+        except FileNotFoundError:
+            key = secrets.token_hex(32)
         try:
             fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         except FileExistsError:

@@ -44,12 +44,14 @@ flask --app app run
 
 Open http://127.0.0.1:5000.
 
-When `SECRET_KEY` is not set, the app generates a persistent key in the user's
-configuration directory, outside the project (on Windows:
-`%LOCALAPPDATA%\Boki.blog\secret_key`). Keep this file when moving or backing up a
-local installation. For a hosted deployment, configure `SECRET_KEY` in the
-deployment environment or secret manager; `python generate_secret_key.py` can
-generate a value for this purpose. Do not commit the key to the codebase.
+When `SECRET_KEY` is not set, the app loads or generates a key at
+`instance/secret_key`. This file is ignored by Git. Keep it with the database and
+uploads when moving or backing up an installation. Existing installations keep
+using their key from the user's configuration directory when it is available.
+For a hosted deployment, keep `instance/` on persistent storage or configure
+`SECRET_KEY` in the deployment environment or secret manager (recommended);
+`python generate_secret_key.py` can generate a value for this purpose. Do not
+commit the key to the codebase.
 Changing it invalidates existing login sessions. User passwords are stored as salted,
 one-way hashes and do not use `SECRET_KEY` for encryption.
 Email addresses are no longer collected; upgrading an existing database removes
@@ -64,7 +66,8 @@ Do not use it on a real site.
 | Variable | What it does |
 | --- | --- |
 | `SIGNUP_PASSWORD` | Initial signup password. Only read the first time the database is created. Change it later on the Admin page. |
-| `SECRET_KEY` | Optional locally; if unset, a 256-bit key is generated in the user's configuration directory outside the project. For hosted deployments, set a stable value of at least 32 bytes using the runtime environment or a secret manager. |
+| `SECRET_KEY` | Optional locally; if unset, a 256-bit key is generated in `instance/`. For hosted deployments, set a stable value of at least 32 bytes using the runtime environment or a secret manager. |
+| `SECRET_KEY_FILE` | Optional path for the persistent key file used when `SECRET_KEY` is not set. Default: `instance/secret_key`. |
 | `SITE_NAME` | Name shown in the header. Default: Boki.blog. |
 | `BLOG_DB` | Path to the SQLite file. Default: `instance/blog.db`. |
 | `BLOG_HTTPS` | Set to `1` when serving over HTTPS so cookies are marked secure. |
@@ -73,7 +76,8 @@ Do not use it on a real site.
 
 `flask run` is for development. For a real site, serve it with a production server
 such as gunicorn (`pip install gunicorn`, then `gunicorn app:app`) behind HTTPS, and set
-`BLOG_HTTPS=1`. Back up the database and uploads in `instance/`; keep `SECRET_KEY`
+`BLOG_HTTPS=1`. Back up the database and uploads in `instance/`; make sure its
+storage is persistent if relying on the generated key, or keep `SECRET_KEY`
 separately in your deployment's secret manager.
 
 The log-in and signup-password throttling is kept in memory and per process, which is
