@@ -84,7 +84,7 @@
         </div>
         {% if g.user %}
           {% if crossword_completed %}
-            <p class="crossword-complete" role="status">Puzzle solved — you earned a <span class="achievement-star" aria-hidden="true">★</span> by your name!</p>
+            <p class="crossword-complete" role="status">Puzzle solved!! You earned a <span class="achievement-star" aria-hidden="true">★</span> by your name!</p>
           {% else %}
             <form class="crossword-solve-form" method="post" action="{{ url_for('solve_crossword') }}" data-crossword-solve-form>
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -99,7 +99,7 @@
       </div>
     {% else %}
       <div class="bokword-placeholder">
-        <p>Boki is preparing this week&rsquo;s crossword.</p>
+        <p>Boki is preparing this week&rsquo;s Bokword.</p>
         {% if g.user and g.user.is_admin %}<p><a href="{{ url_for('admin') }}#crossword">Create the Weekly Bokword puzzle</a></p>{% endif %}
       </div>
     {% endif %}
