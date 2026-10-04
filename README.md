@@ -22,8 +22,9 @@ A small multi-user blog built with Flask and SQLite.
   Resetting the crossword saves an all-blocked grid, unpublishes the puzzle, and
   clears solver stars.
   Crossword solvers earn a star by their username
-  until the puzzle is changed or reset. Crossword answers accept Latin and Greek
-  letters, including accented Greek vowels.
+  until the puzzle is changed or reset, and each earned star adds to their
+  cumulative Bokword victories on their profile. Crossword answers accept Latin
+  and Greek letters, including accented Greek vowels.
 
 ## Setup
 

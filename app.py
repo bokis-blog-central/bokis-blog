@@ -172,6 +172,14 @@ def init_db():
         for column, definition in columns.items():
             if column not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+    if "bokword_victories" not in user_columns:
+        conn.execute(
+            "ALTER TABLE users ADD COLUMN bokword_victories "
+            "INTEGER NOT NULL DEFAULT 0")
+        conn.execute(
+            "UPDATE users SET bokword_victories = ("
+            "SELECT COUNT(*) FROM crossword_completions c "
+            "WHERE c.user_id = users.id)")
     has_pw = conn.execute(
         "SELECT 1 FROM settings WHERE key = 'signup_password_hash'").fetchone()
     if not has_pw:
@@ -696,6 +704,7 @@ def profile(username):
     user = db().execute(
         """SELECT u.id, u.username, u.created_at, u.bio, u.avatar,
                   u.avatar_position_x, u.avatar_position_y, u.profile_bg, u.profile_text,
+                  u.bokword_victories,
                   EXISTS(
                     SELECT 1 FROM crossword_completions c
                     JOIN crossword_state s ON s.id = 1
@@ -1210,11 +1219,14 @@ def solve_crossword():
     guess = normalize_crossword_text(request.form.get("guess", ""))
     solved = len(guess) == 225 and guess == crossword["solution"]
     if solved:
-        db().execute(
+        award = db().execute(
             "INSERT OR IGNORE INTO crossword_completions "
-            "(user_id, puzzle_version, guess) VALUES (?, ?, ?) "
-            "ON CONFLICT(user_id, puzzle_version) DO UPDATE SET guess = excluded.guess",
+            "(user_id, puzzle_version, guess) VALUES (?, ?, ?)",
             (g.user["id"], crossword["version"], guess))
+        if award.rowcount:
+            db().execute(
+                "UPDATE users SET bokword_victories = bokword_victories + 1 "
+                "WHERE id = ?", (g.user["id"],))
         db().commit()
     if request.accept_mimetypes.best == "application/json":
         return jsonify(solved=solved)
