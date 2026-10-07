@@ -1,20 +1,13 @@
 {% extends "base.html" %}
 {% block title %}{{ 'Write a post' if mode == 'new' else 'Edit post' }} | {% endblock %}
 {% block content %}
-<div class="wrap page narrow">
+<div class="wrap page narrow post-form-page">
   <h1 class="page-title">{{ 'Write a post' if mode == 'new' else 'Edit post' }}</h1>
   <form method="post" class="stack" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="field-group">
       <label for="title">Title</label>
       <input id="title" name="title" type="text" maxlength="120" value="{{ title }}" required>
-    </div>
-    <div class="field-group">
-      <label for="title-color">Post title color</label>
-      <div class="color-control">
-        <input id="title-color" name="title_color" type="text" value="{{ title_color }}" maxlength="7" pattern="#?[0-9A-Fa-f]{6}" required data-color-hex>
-        <input type="color" value="{{ title_color }}" aria-label="Choose post title color" data-color-wheel>
-      </div>
     </div>
     <div class="field-group">
       <label for="body">Post</label>
@@ -32,6 +25,13 @@
     </div>
     <div class="color-fields">
       <div class="field-group">
+        <label for="title-color">Post title color</label>
+        <div class="color-control">
+          <input id="title-color" name="title_color" type="text" value="{{ title_color }}" maxlength="7" pattern="#?[0-9A-Fa-f]{6}" required data-color-hex>
+          <input type="color" value="{{ title_color }}" aria-label="Choose post title color" data-color-wheel>
+        </div>
+      </div>
+      <div class="field-group">
         <label for="text-color">Post body text color</label>
         <div class="color-control">
           <input id="text-color" name="text_color" type="text" value="{{ text_color }}" maxlength="7" pattern="#?[0-9A-Fa-f]{6}" required data-color-hex>
@@ -46,7 +46,7 @@
         </div>
       </div>
       <div class="field-group">
-        <label for="accent-color">Post accent and border color</label>
+        <label for="accent-color">Post accent color</label>
         <div class="color-control">
           <input id="accent-color" name="accent_color" type="text" value="{{ accent_color|default('#6A2E35', true) }}" maxlength="7" pattern="#?[0-9A-Fa-f]{6}" required data-color-hex>
           <input type="color" value="{{ accent_color|default('#6A2E35', true) }}" aria-label="Choose post accent and border color" data-color-wheel>
@@ -59,10 +59,18 @@
           <input type="color" value="{{ surface_color|default('#D3BE7A', true) }}" aria-label="Choose post surface color" data-color-wheel>
         </div>
       </div>
+      <div class="field-group">
+        <label for="button-text-color">Post button text color</label>
+        <div class="color-control">
+          <input id="button-text-color" name="button_text_color" type="text" value="{{ button_text_color|default('#D9DD92', true) }}" maxlength="7" pattern="#?[0-9A-Fa-f]{6}" required data-color-hex>
+          <input type="color" value="{{ button_text_color|default('#D9DD92', true) }}" aria-label="Choose post button text color" data-color-wheel>
+        </div>
+      </div>
       <p class="help">Accent and surface colors apply to this post and its comments. The site header and footer keep their site colors.</p>
       <aside class="color-preview" data-color-preview aria-label="Post color preview">
-        <h3 data-preview-title>{{ title or 'Your post title' }}</h3>
+        <h3><span data-preview-title>{{ title or 'Your post title' }}</span> <span class="tag preview-tag" aria-hidden="true">Featured this week</span></h3>
         <p data-preview-body>{{ body or 'Your post body will use the selected body color.' }}</p>
+        <button class="button preview-button" type="button" data-preview-button>Sample button</button>
       </aside>
     </div>
     <div class="actions">

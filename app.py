@@ -97,7 +97,8 @@ CREATE TABLE IF NOT EXISTS posts (
     title_color TEXT NOT NULL DEFAULT '#2E2836',
     background_color TEXT NOT NULL DEFAULT '#D9DD92',
     accent_color TEXT NOT NULL DEFAULT '#6A2E35',
-    surface_color TEXT NOT NULL DEFAULT '#D3BE7A'
+    surface_color TEXT NOT NULL DEFAULT '#D3BE7A',
+    button_text_color TEXT NOT NULL DEFAULT '#D9DD92'
 );
 CREATE INDEX IF NOT EXISTS posts_created ON posts(created_at);
 CREATE INDEX IF NOT EXISTS posts_user ON posts(user_id, created_at);
@@ -185,6 +186,7 @@ def init_db():
             "background_color": "TEXT NOT NULL DEFAULT '#D9DD92'",
             "accent_color": "TEXT NOT NULL DEFAULT '#6A2E35'",
             "surface_color": "TEXT NOT NULL DEFAULT '#D3BE7A'",
+            "button_text_color": "TEXT NOT NULL DEFAULT '#D9DD92'",
         },
         "crossword_completions": {
             "guess": "TEXT",
@@ -263,7 +265,7 @@ POST_COLS = """
     ) AS crossword_star,
     u.avatar AS author_avatar, u.avatar_position_x AS author_avatar_x,
     u.avatar_position_y AS author_avatar_y, p.image, p.text_color, p.title_color,
-    p.background_color, p.accent_color, p.surface_color,
+    p.background_color, p.accent_color, p.surface_color, p.button_text_color,
     (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) AS like_count,
     EXISTS(SELECT 1 FROM likes l WHERE l.post_id = p.id AND l.user_id = ?) AS liked
 """
@@ -900,6 +902,7 @@ def validate_post_form():
     background_color = normalize_color(request.form.get("background_color", ""))
     accent_color = normalize_color(request.form.get("accent_color", ""))
     surface_color = normalize_color(request.form.get("surface_color", ""))
+    button_text_color = normalize_color(request.form.get("button_text_color", ""))
     errors = []
     if not title:
         errors.append("Give your post a title.")
@@ -919,13 +922,15 @@ def validate_post_form():
         errors.append("Enter a valid accent color in #RRGGBB format.")
     if surface_color is None:
         errors.append("Enter a valid surface color in #RRGGBB format.")
+    if button_text_color is None:
+        errors.append("Enter a valid button text color in #RRGGBB format.")
     try:
         image = read_uploaded_image(request.files.get("image"))
     except ValueError as exc:
         errors.append(str(exc))
         image = None
     return (title, body, text_color, title_color, background_color,
-            accent_color, surface_color, image, errors)
+            accent_color, surface_color, button_text_color, image, errors)
 
 
 @app.route("/new", methods=["GET", "POST"])
@@ -933,15 +938,15 @@ def validate_post_form():
 def new_post():
     if request.method == "POST":
         (title, body, text_color, title_color, background_color,
-         accent_color, surface_color, image_data, errors) = validate_post_form()
+         accent_color, surface_color, button_text_color, image_data, errors) = validate_post_form()
         if not errors:
             image = store_uploaded_image(image_data)
             cur = db().execute(
                 "INSERT INTO posts (user_id, title, body, image, text_color, title_color, "
-                "background_color, accent_color, surface_color) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "background_color, accent_color, surface_color, button_text_color) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (g.user["id"], title, body, image, text_color, title_color,
-                 background_color, accent_color, surface_color))
+                 background_color, accent_color, surface_color, button_text_color))
             db().commit()
             flash("Post published.", "ok")
             return redirect(url_for("post", post_id=cur.lastrowid))
@@ -953,11 +958,13 @@ def new_post():
                                background_color=background_color or "#D9DD92",
                                accent_color=accent_color or "#6A2E35",
                                surface_color=surface_color or "#D3BE7A",
+                               button_text_color=button_text_color or "#D9DD92",
                                post=None)
     return render_template("post_form.html", mode="new", title="", body="",
                            text_color="#2E2836", title_color="#2E2836",
                            background_color="#D9DD92", accent_color="#6A2E35",
-                           surface_color="#D3BE7A", post=None)
+                           surface_color="#D3BE7A", button_text_color="#D9DD92",
+                           post=None)
 
 
 @app.route("/post/<int:post_id>/edit", methods=["GET", "POST"])
@@ -970,7 +977,7 @@ def edit_post(post_id):
         abort(403, "You can only edit your own posts.")
     if request.method == "POST":
         (title, body, text_color, title_color, background_color,
-         accent_color, surface_color, image_data, errors) = validate_post_form()
+         accent_color, surface_color, button_text_color, image_data, errors) = validate_post_form()
         if not errors:
             old_image = row["image"]
             image = old_image
@@ -981,10 +988,10 @@ def edit_post(post_id):
             db().execute(
                 "UPDATE posts SET title = ?, body = ?, image = ?, text_color = ?, "
                 "title_color = ?, background_color = ?, accent_color = ?, "
-                "surface_color = ?, updated_at = datetime('now') "
+                "surface_color = ?, button_text_color = ?, updated_at = datetime('now') "
                 "WHERE id = ?",
                 (title, body, image, text_color, title_color, background_color,
-                 accent_color, surface_color, post_id))
+                 accent_color, surface_color, button_text_color, post_id))
             db().commit()
             if image != old_image:
                 remove_uploaded_image(old_image)
@@ -998,14 +1005,16 @@ def edit_post(post_id):
                                title_color=title_color or "#2E2836",
                                background_color=background_color or "#D9DD92",
                                accent_color=accent_color or "#6A2E35",
-                               surface_color=surface_color or "#D3BE7A")
+                               surface_color=surface_color or "#D3BE7A",
+                               button_text_color=button_text_color or "#D9DD92")
     return render_template("post_form.html", mode="edit", post=row,
                            title=row["title"], body=row["body"],
                            text_color=row["text_color"],
                            title_color=row["title_color"],
                            background_color=row["background_color"],
                            accent_color=row["accent_color"],
-                           surface_color=row["surface_color"])
+                           surface_color=row["surface_color"],
+                           button_text_color=row["button_text_color"])
 
 
 @app.post("/post/<int:post_id>/delete")

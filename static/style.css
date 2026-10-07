@@ -377,6 +377,7 @@ h1, h2, h3, h4 {
 
 .page { padding-block: clamp(2rem, 5vw, 3.5rem) clamp(3rem, 8vw, 6rem); }
 .page.narrow { max-width: 38rem; margin-inline: auto; }
+.page.narrow.post-form-page { max-width: 46rem; }
 .page-title { font-size: clamp(2rem, 5vw, 3rem); font-weight: 800; letter-spacing: -0.03em; margin-bottom: 1.25rem; }
 .intro { color: var(--ink-soft); margin: 0 0 1.5rem; }
 
@@ -458,6 +459,7 @@ h1, h2, h3, h4 {
 .check-field { display: flex !important; align-items: center; gap: 0.5rem; margin-block: 0.5rem; }
 .check-field input { width: auto; }
 .color-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 1rem; }
+.color-fields > .help, .color-fields > .color-preview { grid-column: 1 / -1; }
 .color-control { display: flex; gap: 0.6rem; align-items: center; }
 .color-control input[data-color-hex] { min-width: 0; }
 input[type="color"] {
@@ -521,13 +523,24 @@ textarea { resize: vertical; line-height: 1.6; }
   padding: 1.25rem;
   border: 1px solid var(--preview-accent, var(--line));
   border-radius: 8px;
-  background: var(--preview-surface, var(--preview-background, var(--surface)));
+  background: var(--preview-background, var(--surface));
   color: var(--preview-body, var(--ink));
 }
 .color-preview h3 {
   margin-bottom: 0.5rem;
   color: var(--preview-title, var(--ink));
   text-decoration-color: var(--preview-accent, var(--line));
+}
+.color-preview .preview-tag {
+  margin-left: 0.4rem; vertical-align: middle;
+  background: var(--preview-surface, var(--mark));
+  color: var(--preview-body, var(--ink));
+}
+.color-preview .preview-button {
+  margin-top: 0.75rem;
+  border-color: var(--preview-accent, var(--accent));
+  background: var(--preview-accent, var(--accent));
+  color: var(--preview-button-text, var(--accent-ink));
 }
 .profile-color-preview, .profile-color-preview h3 {
   color: var(--preview-text, var(--ink));
@@ -589,6 +602,7 @@ textarea { resize: vertical; line-height: 1.6; }
   --accent: #6A2E35;
   --mark: #D3BE7A;
   --danger: #6A2E35;
+  --accent-ink: #D9DD92;
   background: var(--bg);
   color: var(--ink);
 }

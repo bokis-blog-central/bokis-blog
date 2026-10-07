@@ -27,6 +27,7 @@ function updateColorPreview(form) {
     title_color: "--preview-title",
     accent_color: "--preview-accent",
     surface_color: "--preview-surface",
+    button_text_color: "--preview-button-text",
   };
 
   Object.entries(styleMap).forEach(([fieldName, property]) => {
