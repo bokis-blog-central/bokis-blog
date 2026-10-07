@@ -5,6 +5,7 @@ Full setup steps are in README.md.
 """
 import json
 import os
+import random
 import re
 import secrets
 import sqlite3
@@ -94,7 +95,9 @@ CREATE TABLE IF NOT EXISTS posts (
     image      TEXT,
     text_color TEXT NOT NULL DEFAULT '#2E2836',
     title_color TEXT NOT NULL DEFAULT '#2E2836',
-    background_color TEXT NOT NULL DEFAULT '#D9DD92'
+    background_color TEXT NOT NULL DEFAULT '#D9DD92',
+    accent_color TEXT NOT NULL DEFAULT '#6A2E35',
+    surface_color TEXT NOT NULL DEFAULT '#D3BE7A'
 );
 CREATE INDEX IF NOT EXISTS posts_created ON posts(created_at);
 CREATE INDEX IF NOT EXISTS posts_user ON posts(user_id, created_at);
@@ -136,6 +139,23 @@ CREATE TABLE IF NOT EXISTS crossword_completions (
     completed_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (user_id, puzzle_version)
 );
+
+CREATE TABLE IF NOT EXISTS boknections_state (
+    id         INTEGER PRIMARY KEY CHECK (id = 1),
+    puzzle     TEXT NOT NULL,
+    version    INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS boknections_progress (
+    user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    puzzle_version INTEGER NOT NULL,
+    attempts_used  INTEGER NOT NULL DEFAULT 0,
+    locked         TEXT NOT NULL DEFAULT '[]',
+    wild_found     INTEGER NOT NULL DEFAULT 0,
+    solved         INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, puzzle_version)
+);
 """
 
 
@@ -156,12 +176,15 @@ def init_db():
             "avatar_position_y": "INTEGER NOT NULL DEFAULT 50",
             "profile_bg": "TEXT NOT NULL DEFAULT '#D9DD92'",
             "profile_text": "TEXT NOT NULL DEFAULT '#2E2836'",
+            "boknections_victories": "INTEGER NOT NULL DEFAULT 0",
         },
         "posts": {
             "image": "TEXT",
             "text_color": "TEXT NOT NULL DEFAULT '#2E2836'",
             "title_color": "TEXT NOT NULL DEFAULT '#2E2836'",
             "background_color": "TEXT NOT NULL DEFAULT '#D9DD92'",
+            "accent_color": "TEXT NOT NULL DEFAULT '#6A2E35'",
+            "surface_color": "TEXT NOT NULL DEFAULT '#D3BE7A'",
         },
         "crossword_completions": {
             "guess": "TEXT",
@@ -240,7 +263,7 @@ POST_COLS = """
     ) AS crossword_star,
     u.avatar AS author_avatar, u.avatar_position_x AS author_avatar_x,
     u.avatar_position_y AS author_avatar_y, p.image, p.text_color, p.title_color,
-    p.background_color,
+    p.background_color, p.accent_color, p.surface_color,
     (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) AS like_count,
     EXISTS(SELECT 1 FROM likes l WHERE l.post_id = p.id AND l.user_id = ?) AS liked
 """
@@ -321,6 +344,19 @@ def normalize_crossword_text(text):
     return uppercase.replace("Ι\u0308\u0301", "Ϊ").replace("Υ\u0308\u0301", "Ϋ")
 
 
+# Capital letters that look identical in Latin and Greek. Answers are compared
+# with these folded together, so typing the Latin P where the grid has Greek Ρ
+# (or the reverse) counts as correct. Accented Greek vowels are NOT folded.
+_LATIN_LOOKALIKES = "ABEHIKMNOPTXYZ"
+_GREEK_LOOKALIKES = "ΑΒΕΗΙΚΜΝΟΡΤΧΥΖ"
+_LOOKALIKE_TO_GREEK = str.maketrans(_LATIN_LOOKALIKES, _GREEK_LOOKALIKES)
+
+
+def crossword_match_key(text):
+    """Form of a normalized crossword string used only to compare answers."""
+    return text.translate(_LOOKALIKE_TO_GREEK)
+
+
 def validate_crossword(solution_text, clues_text):
     rows = [
         normalize_crossword_text(row)
@@ -357,6 +393,117 @@ def validate_crossword(solution_text, clues_text):
     if set(clues) != expected_keys:
         return None, None, "The grid changed; check the generated clues and try saving again."
     return solution, normalized_clues, None
+
+
+# ----------------------------------------------------------------------
+# Boknections, Wild Card (monthly game)
+# ----------------------------------------------------------------------
+
+BOKNECTIONS_ATTEMPTS = 10
+BOKNECTIONS_GROUPS = 4
+
+
+def boknections_enabled():
+    return get_setting("boknections_enabled") == "1"
+
+
+def get_boknections():
+    row = db().execute(
+        "SELECT puzzle, version FROM boknections_state WHERE id = 1").fetchone()
+    if row is None:
+        return None
+    data = json.loads(row["puzzle"])
+    return {"categories": data["categories"], "wild": data["wild"],
+            "version": row["version"]}
+
+
+def validate_boknections_form(form):
+    """Return (puzzle dict, None) or (None, error message)."""
+    def clean(name, limit):
+        value = " ".join(form.get(name, "").split())
+        if not value or len(value) > limit:
+            return None
+        return unicodedata.normalize("NFC", value)
+
+    categories = []
+    for i in range(1, BOKNECTIONS_GROUPS + 1):
+        title = clean(f"cat{i}_title", 60)
+        if title is None:
+            return None, f"Category {i} needs a title of at most 60 characters."
+        words = []
+        for j in range(1, 4):
+            word = clean(f"cat{i}_word{j}", 40)
+            if word is None:
+                return None, f"Category {i}, word {j} must be 1 to 40 characters."
+            words.append(word)
+        categories.append({"title": title, "words": words})
+    wild = clean("wild", 40)
+    if wild is None:
+        return None, "The wild card must be 1 to 40 characters."
+    everything = [w for c in categories for w in c["words"]] + [wild]
+    if len({w.casefold() for w in everything}) != len(everything):
+        return None, "All 13 words must be different from each other."
+    return {"categories": categories, "wild": wild}, None
+
+
+def get_boknections_progress(user_id, version):
+    row = db().execute(
+        "SELECT attempts_used, locked, wild_found, solved FROM boknections_progress "
+        "WHERE user_id = ? AND puzzle_version = ?", (user_id, version)).fetchone()
+    if row is None:
+        return {"attempts_used": 0, "locked": [], "wild_found": False,
+                "solved": False}
+    return {"attempts_used": row["attempts_used"],
+            "locked": json.loads(row["locked"]),
+            "wild_found": bool(row["wild_found"]), "solved": bool(row["solved"])}
+
+
+def boknections_board(puzzle, progress):
+    """Everything the home page needs, without leaking unsolved answers."""
+    categories = puzzle["categories"]
+    over = (progress["attempts_used"] >= BOKNECTIONS_ATTEMPTS
+            and not progress["solved"])
+    shown = []
+    for index, category in enumerate(categories):
+        found = index in progress["locked"]
+        if found or over:
+            shown.append({"title": category["title"], "words": category["words"],
+                          "missed": not found})
+    wild_shown = progress["wild_found"] or over
+    finished = progress["solved"] or over
+    placed = {w for c in shown for w in c["words"]}
+    if wild_shown:
+        placed.add(puzzle["wild"])
+    words = [w for c in categories for w in c["words"]] + [puzzle["wild"]]
+    random.Random(puzzle["version"]).shuffle(words)
+    return {
+        "prepared": True,
+        "version": puzzle["version"],
+        "locked": shown,
+        "wild": puzzle["wild"] if wild_shown else None,
+        "wild_missed": over and not progress["wild_found"],
+        "open_groups": 0 if finished else BOKNECTIONS_GROUPS - len(shown),
+        "wild_open": not wild_shown,
+        "pool": [] if finished else [w for w in words if w not in placed],
+        "attempts_used": progress["attempts_used"],
+        "attempts_left": max(0, BOKNECTIONS_ATTEMPTS - progress["attempts_used"]),
+        "attempts_max": BOKNECTIONS_ATTEMPTS,
+        "solved": progress["solved"],
+        "over": over,
+    }
+
+
+def flower_usernames():
+    """Usernames that solved the current Boknections; one query per request."""
+    if "flower_users" not in g:
+        g.flower_users = set()
+        if boknections_enabled():
+            rows = db().execute(
+                "SELECT u.username FROM boknections_progress p "
+                "JOIN boknections_state s ON s.id = 1 AND s.version = p.puzzle_version "
+                "JOIN users u ON u.id = p.user_id WHERE p.solved = 1").fetchall()
+            g.flower_users = {row["username"] for row in rows}
+    return g.flower_users
 
 
 def get_post(post_id):
@@ -475,6 +622,7 @@ def security_headers(resp):
 
 
 app.jinja_env.globals["csrf_token"] = lambda: session.get("csrf", "")
+app.jinja_env.globals["has_flower"] = lambda username: username in flower_usernames()
 
 
 @app.context_processor
@@ -621,8 +769,18 @@ def home():
         for entry in crossword_entries_list:
             entry["hint"] = crossword["clues"].get(entry["key"], "")
 
+    boknections = None
+    if boknections_enabled():
+        boknections = {"prepared": False}
+        puzzle = get_boknections()
+        if puzzle:
+            progress = get_boknections_progress(
+                g.user["id"] if g.user else -1, puzzle["version"])
+            boknections = boknections_board(puzzle, progress)
+
     return render_template("home.html", top_week=top_week, featured=featured,
                            latest_admin_post=latest_admin_post,
+                           boknections=boknections,
                            crossword=crossword,
                            crossword_entries=crossword_entries_list,
                            crossword_completed=crossword_completed,
@@ -704,7 +862,7 @@ def profile(username):
     user = db().execute(
         """SELECT u.id, u.username, u.created_at, u.bio, u.avatar,
                   u.avatar_position_x, u.avatar_position_y, u.profile_bg, u.profile_text,
-                  u.bokword_victories,
+                  u.bokword_victories, u.boknections_victories,
                   EXISTS(
                     SELECT 1 FROM crossword_completions c
                     JOIN crossword_state s ON s.id = 1
@@ -740,6 +898,8 @@ def validate_post_form():
     text_color = normalize_color(request.form.get("text_color", ""))
     title_color = normalize_color(request.form.get("title_color", ""))
     background_color = normalize_color(request.form.get("background_color", ""))
+    accent_color = normalize_color(request.form.get("accent_color", ""))
+    surface_color = normalize_color(request.form.get("surface_color", ""))
     errors = []
     if not title:
         errors.append("Give your post a title.")
@@ -755,25 +915,33 @@ def validate_post_form():
         errors.append("Enter a valid title color in #RRGGBB format.")
     if background_color is None:
         errors.append("Enter a valid background color in #RRGGBB format.")
+    if accent_color is None:
+        errors.append("Enter a valid accent color in #RRGGBB format.")
+    if surface_color is None:
+        errors.append("Enter a valid surface color in #RRGGBB format.")
     try:
         image = read_uploaded_image(request.files.get("image"))
     except ValueError as exc:
         errors.append(str(exc))
         image = None
-    return title, body, text_color, title_color, background_color, image, errors
+    return (title, body, text_color, title_color, background_color,
+            accent_color, surface_color, image, errors)
 
 
 @app.route("/new", methods=["GET", "POST"])
 @login_required
 def new_post():
     if request.method == "POST":
-        title, body, text_color, title_color, background_color, image_data, errors = validate_post_form()
+        (title, body, text_color, title_color, background_color,
+         accent_color, surface_color, image_data, errors) = validate_post_form()
         if not errors:
             image = store_uploaded_image(image_data)
             cur = db().execute(
                 "INSERT INTO posts (user_id, title, body, image, text_color, title_color, "
-                "background_color) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (g.user["id"], title, body, image, text_color, title_color, background_color))
+                "background_color, accent_color, surface_color) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (g.user["id"], title, body, image, text_color, title_color,
+                 background_color, accent_color, surface_color))
             db().commit()
             flash("Post published.", "ok")
             return redirect(url_for("post", post_id=cur.lastrowid))
@@ -783,10 +951,13 @@ def new_post():
                                text_color=text_color or "#2E2836",
                                title_color=title_color or "#2E2836",
                                background_color=background_color or "#D9DD92",
+                               accent_color=accent_color or "#6A2E35",
+                               surface_color=surface_color or "#D3BE7A",
                                post=None)
     return render_template("post_form.html", mode="new", title="", body="",
                            text_color="#2E2836", title_color="#2E2836",
-                           background_color="#D9DD92", post=None)
+                           background_color="#D9DD92", accent_color="#6A2E35",
+                           surface_color="#D3BE7A", post=None)
 
 
 @app.route("/post/<int:post_id>/edit", methods=["GET", "POST"])
@@ -798,7 +969,8 @@ def edit_post(post_id):
     if row["user_id"] != g.user["id"]:
         abort(403, "You can only edit your own posts.")
     if request.method == "POST":
-        title, body, text_color, title_color, background_color, image_data, errors = validate_post_form()
+        (title, body, text_color, title_color, background_color,
+         accent_color, surface_color, image_data, errors) = validate_post_form()
         if not errors:
             old_image = row["image"]
             image = old_image
@@ -808,9 +980,11 @@ def edit_post(post_id):
                 image = None
             db().execute(
                 "UPDATE posts SET title = ?, body = ?, image = ?, text_color = ?, "
-                "title_color = ?, background_color = ?, updated_at = datetime('now') "
+                "title_color = ?, background_color = ?, accent_color = ?, "
+                "surface_color = ?, updated_at = datetime('now') "
                 "WHERE id = ?",
-                (title, body, image, text_color, title_color, background_color, post_id))
+                (title, body, image, text_color, title_color, background_color,
+                 accent_color, surface_color, post_id))
             db().commit()
             if image != old_image:
                 remove_uploaded_image(old_image)
@@ -822,12 +996,16 @@ def edit_post(post_id):
                                title=title, body=body,
                                text_color=text_color or "#2E2836",
                                title_color=title_color or "#2E2836",
-                               background_color=background_color or "#D9DD92")
+                               background_color=background_color or "#D9DD92",
+                               accent_color=accent_color or "#6A2E35",
+                               surface_color=surface_color or "#D3BE7A")
     return render_template("post_form.html", mode="edit", post=row,
                            title=row["title"], body=row["body"],
                            text_color=row["text_color"],
                            title_color=row["title_color"],
-                           background_color=row["background_color"])
+                           background_color=row["background_color"],
+                           accent_color=row["accent_color"],
+                           surface_color=row["surface_color"])
 
 
 @app.post("/post/<int:post_id>/delete")
@@ -1149,8 +1327,47 @@ def admin():
         ]
         crossword_clues = crossword["clues"]
     return render_template("admin.html", stats=stats, featured_post=featured_post,
+                           boknections_on=boknections_enabled(),
+                           boknections_puzzle=get_boknections(),
                            crossword=crossword, crossword_rows=crossword_rows,
                            crossword_clues=crossword_clues)
+
+
+@app.post("/admin/boknections/toggle")
+@admin_required
+def admin_toggle_boknections():
+    enabled = request.form.get("enabled") == "1"
+    set_setting("boknections_enabled", "1" if enabled else "0")
+    flash("Boknections, Wild Card is now "
+          + ("shown on the home page." if enabled else "hidden."), "ok")
+    return redirect(url_for("admin") + "#boknections")
+
+
+@app.post("/admin/boknections")
+@admin_required
+def admin_save_boknections():
+    puzzle, error = validate_boknections_form(request.form)
+    if error:
+        flash(error, "error")
+        return redirect(url_for("admin") + "#boknections")
+    serialized = json.dumps(puzzle, ensure_ascii=False, sort_keys=True)
+    state = db().execute(
+        "SELECT puzzle FROM boknections_state WHERE id = 1").fetchone()
+    if state is None:
+        db().execute(
+            "INSERT INTO boknections_state (id, puzzle, version) VALUES (1, ?, 1)",
+            (serialized,))
+        flash("Boknections puzzle saved.", "ok")
+    elif json.loads(state["puzzle"]) != puzzle:
+        db().execute(
+            "UPDATE boknections_state SET puzzle = ?, version = version + 1, "
+            "updated_at = datetime('now') WHERE id = 1", (serialized,))
+        db().execute("DELETE FROM boknections_progress")
+        flash("Boknections puzzle updated; attempts and flowers were reset.", "ok")
+    else:
+        flash("No Boknections changes to save.", "info")
+    db().commit()
+    return redirect(url_for("admin") + "#boknections")
 
 
 @app.post("/admin/crossword")
@@ -1217,7 +1434,8 @@ def solve_crossword():
     if crossword is None:
         abort(404)
     guess = normalize_crossword_text(request.form.get("guess", ""))
-    solved = len(guess) == 225 and guess == crossword["solution"]
+    solved = len(guess) == 225 and (
+        crossword_match_key(guess) == crossword_match_key(crossword["solution"]))
     if solved:
         award = db().execute(
             "INSERT OR IGNORE INTO crossword_completions "
@@ -1235,6 +1453,75 @@ def solve_crossword():
     else:
         flash("Not quite yet. Keep trying!", "info")
     return redirect(url_for("home") + "#bokword")
+
+
+@app.post("/boknections/check")
+@login_required
+def check_boknections():
+    puzzle = get_boknections() if boknections_enabled() else None
+    if puzzle is None:
+        abort(404)
+    user_id, version = g.user["id"], puzzle["version"]
+    db().execute(
+        "INSERT OR IGNORE INTO boknections_progress (user_id, puzzle_version) "
+        "VALUES (?, ?)", (user_id, version))
+    progress = get_boknections_progress(user_id, version)
+    if progress["solved"] or progress["attempts_used"] >= BOKNECTIONS_ATTEMPTS:
+        return jsonify(error="You have no attempts left."), 400
+
+    categories = puzzle["categories"]
+    open_indexes = [i for i in range(BOKNECTIONS_GROUPS)
+                    if i not in progress["locked"]]
+    try:
+        placement = json.loads(request.form.get("placement", ""))
+        groups = placement["groups"]
+        wild_word = placement.get("wild")
+    except (TypeError, ValueError, KeyError, AttributeError):
+        return jsonify(error="Fill a category or the wild card before checking."), 400
+    if progress["wild_found"]:
+        wild_word = None
+    remaining = [w for i in open_indexes for w in categories[i]["words"]]
+    if not progress["wild_found"]:
+        remaining.append(puzzle["wild"])
+    valid_shape = (
+        isinstance(groups, list) and len(groups) <= len(open_indexes)
+        and all(isinstance(group, list) and len(group) == 3
+                and all(isinstance(w, str) for w in group) for group in groups)
+        and (wild_word is None or isinstance(wild_word, str)))
+    submitted = [w for group in groups for w in group] if valid_shape else []
+    if wild_word is not None:
+        submitted.append(wild_word)
+    if (not valid_shape or not submitted or len(set(submitted)) != len(submitted)
+            or not set(submitted) <= set(remaining)):
+        return jsonify(error="Fill a category or the wild card before checking."), 400
+
+    newly = []
+    for group in groups:
+        for i in open_indexes:
+            if i not in newly and set(group) == set(categories[i]["words"]):
+                newly.append(i)
+                break
+    wild_now = progress["wild_found"] or wild_word == puzzle["wild"]
+    locked = sorted(progress["locked"] + newly)
+    solved = len(locked) == BOKNECTIONS_GROUPS and wild_now
+    update = db().execute(
+        "UPDATE boknections_progress SET attempts_used = attempts_used + 1, "
+        "locked = ?, wild_found = ?, solved = ? "
+        "WHERE user_id = ? AND puzzle_version = ? AND attempts_used = ? AND solved = 0",
+        (json.dumps(locked), int(wild_now), int(solved), user_id, version,
+         progress["attempts_used"]))
+    if update.rowcount != 1:
+        db().rollback()
+        return jsonify(error="That attempt was already recorded. Reload the page."), 409
+    if solved:
+        db().execute(
+            "UPDATE users SET boknections_victories = boknections_victories + 1 "
+            "WHERE id = ?", (user_id,))
+    db().commit()
+    used = progress["attempts_used"] + 1
+    return jsonify(solved=solved, correct=len(newly) + int(wild_now and not progress["wild_found"]),
+                   attempts_left=BOKNECTIONS_ATTEMPTS - used,
+                   over=not solved and used >= BOKNECTIONS_ATTEMPTS)
 
 
 @app.get("/admin/search/posts")

@@ -105,6 +105,74 @@
     {% endif %}
   </section>
 
+  {% if boknections %}
+  <section class="boknections" id="boknections" aria-labelledby="boknections-title">
+    <h2 class="section-title" id="boknections-title">Monthly puzzle: Boknections, Wild Card!</h2>
+    {% if boknections.prepared %}
+      <div data-boknections
+           data-playable="{{ 'true' if g.user and not boknections.solved and not boknections.over else 'false' }}"
+           data-check-url="{{ url_for('check_boknections') }}"
+           data-csrf="{{ csrf_token() }}"
+           data-storage-key="boknections-{{ boknections.version }}-{{ g.user.id if g.user else 0 }}">
+        <p class="help">
+          Twelve of these thirteen words hide in four secret categories of three. The thirteenth, the wild card, fits all four.
+          Drag each word into a box (or tap a word, then tap a box), then check. Complete a category to reveal its title.
+          You have {{ boknections.attempts_max }} attempts in total. Solve it for a flower by your name.
+        </p>
+        <div class="bokn-board">
+          {% for group in boknections.locked %}
+            <div class="bokn-field is-locked{% if group.missed %} is-missed{% endif %}">
+              <h3>{{ group.title }}</h3>
+              <ul class="bokn-slots">{% for word in group.words %}<li class="bokn-tile">{{ word }}</li>{% endfor %}</ul>
+            </div>
+          {% endfor %}
+          {% for n in range(boknections.open_groups) %}
+            <div class="bokn-field" data-bokn-field role="group" aria-label="Group of three, {{ loop.index }}">
+              <h3 class="bokn-unknown">???</h3>
+              <div class="bokn-slots">{% for s in range(3) %}<div class="bokn-slot" data-bokn-slot></div>{% endfor %}</div>
+            </div>
+          {% endfor %}
+          {% if boknections.wild %}
+            <div class="bokn-field bokn-wild is-locked{% if boknections.wild_missed %} is-missed{% endif %}">
+              <h3>Wild Card</h3>
+              <ul class="bokn-slots"><li class="bokn-tile">{{ boknections.wild }}</li></ul>
+            </div>
+          {% else %}
+            <div class="bokn-field bokn-wild" data-bokn-wild role="group" aria-label="Wild card">
+              <h3>Wild Card</h3>
+              <div class="bokn-slots"><div class="bokn-slot" data-bokn-slot></div></div>
+            </div>
+          {% endif %}
+        </div>
+        {% if boknections.pool %}
+          <div class="bokn-pool" data-bokn-pool aria-label="Words to place">
+            {% for word in boknections.pool %}
+              <button class="bokn-tile" type="button" draggable="true" data-bokn-tile data-word="{{ word }}">{{ word }}</button>
+            {% endfor %}
+          </div>
+        {% endif %}
+        {% if not g.user %}
+          <p class="help"><a href="{{ url_for('login', next=url_for('home') ~ '#boknections') }}">Log in</a> to play and earn a flower by your name.</p>
+        {% elif boknections.solved %}
+          <p class="crossword-complete" role="status">Solved!! You earned a <span class="achievement-flower" aria-hidden="true">✿</span> by your name!</p>
+        {% elif boknections.over %}
+          <p class="crossword-complete" role="status">You are out of attempts. The answers are shown above; better luck next month!</p>
+        {% else %}
+          <div class="bokn-controls">
+            <button class="button" type="button" data-bokn-check disabled>Check</button>
+            <p class="crossword-status" aria-live="polite" data-bokn-status>Attempts left: {{ boknections.attempts_left }} of {{ boknections.attempts_max }}.</p>
+          </div>
+        {% endif %}
+      </div>
+    {% else %}
+      <div class="bokword-placeholder">
+        <p>Boki is preparing this month&rsquo;s Boknections.</p>
+        {% if g.user and g.user.is_admin %}<p><a href="{{ url_for('admin') }}#boknections">Create the Boknections puzzle</a></p>{% endif %}
+      </div>
+    {% endif %}
+  </section>
+  {% endif %}
+
   <section aria-labelledby="top-title">
     <h2 class="section-title" id="top-title">Most liked this week</h2>
     {% if top_week %}

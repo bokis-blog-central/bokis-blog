@@ -18,7 +18,7 @@
 {% endmacro %}
 
 {% macro user_name(username, crossword_star=false) %}
-  {{ username }}{% if crossword_star %}<span class="achievement-star" role="img" aria-label="Solved the current Weekly Bokword" title="Solved the current Weekly Bokword">★</span>{% endif %}
+  {{ username }}{% if crossword_star %}<span class="achievement-star" role="img" aria-label="Solved the current Weekly Bokword" title="Solved the current Weekly Bokword">★</span>{% endif %}{% if has_flower(username) %}<span class="achievement-flower" role="img" aria-label="Solved the current Boknections, Wild Card" title="Solved the current Boknections, Wild Card">✿</span>{% endif %}
 {% endmacro %}
 
 {% macro post_row(post, next) %}

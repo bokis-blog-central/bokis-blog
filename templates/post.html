@@ -2,7 +2,7 @@
 {% from "_macros.html" import like_button with context %}
 {% from "_macros.html" import user_name %}
 {% block title %}{{ post.title }} | {% endblock %}
-{% block page_theme %}--bg: {{ post.background_color }}; --ink: {{ post.text_color }}; --ink-soft: {{ post.text_color }}; --post-title-color: {{ post.title_color }}; color: {{ post.text_color }};{% endblock %}
+{% block page_theme %}--bg: {{ post.background_color }}; --ink: {{ post.text_color }}; --ink-soft: {{ post.text_color }}; --line: {{ post.accent_color }}; --divider: {{ post.accent_color }}; --accent: {{ post.accent_color }}; --danger: {{ post.accent_color }}; --surface: {{ post.surface_color }}; --mark: {{ post.surface_color }}; --post-title-color: {{ post.title_color }}; color: {{ post.text_color }};{% endblock %}
 {% block content %}
 <article class="wrap">
   <header class="article-header">

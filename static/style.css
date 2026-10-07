@@ -204,6 +204,8 @@ h1, h2, h3, h4 {
   border-radius: 0 !important;
 }
 .crossword-square.is-revealed { background: var(--surface); }
+.crossword-grid .crossword-square.is-active-word { background: color-mix(in srgb, var(--surface) 80%, #B56D00 20%); }
+.crossword-clues li[data-crossword-entry] { cursor: pointer; }
 .crossword-clues { display: grid; grid-template-columns: repeat(2, minmax(11rem, 1fr)); gap: 1rem; flex: 1 1 20rem; }
 .crossword-clues h3, .crossword-clue-editor h3 { font-size: 1rem; margin-bottom: 0.5rem; }
 .crossword-clues ol { margin: 0; padding: 0; list-style: none; }
@@ -214,6 +216,47 @@ h1, h2, h3, h4 {
 .crossword-status, .crossword-complete { margin: 0; font-weight: 600; }
 .crossword-complete { margin-top: 1rem; }
 .achievement-star { color: #B56D00; font-size: 1.1em; line-height: 1; margin-left: 0.2em; vertical-align: baseline; }
+.achievement-flower { color: #8B008B; font-size: 1.1em; line-height: 1; margin-left: 0.2em; vertical-align: baseline; }
+
+/* ---------- Boknections, Wild Card ---------- */
+.bokn-board {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem; margin-block: 1rem;
+}
+/* Dice-five layout: four categories around the wild card in the middle row. */
+.bokn-board > .bokn-wild {
+  grid-row: 2; grid-column: 1 / -1; justify-self: center; width: min(100%, 50%);
+}
+@media (max-width: 36rem) { .bokn-board > .bokn-wild { width: 100%; } }
+.bokn-field {
+  padding: 0.75rem; border: 2px solid var(--line); border-radius: 10px;
+  background: var(--surface);
+}
+.bokn-field h3 { margin: 0 0 0.5rem; font-size: 1rem; }
+.bokn-unknown { color: var(--ink-soft); letter-spacing: 0.2em; }
+.bokn-slots { display: flex; gap: 0.5rem; margin: 0; padding: 0; list-style: none; }
+.bokn-slot {
+  flex: 1 1 0; min-width: 0; min-height: 3rem; display: flex;
+  border: 2px dashed var(--line); border-radius: 6px; background: var(--bg);
+}
+.bokn-slot.is-over, .bokn-pool.is-over { outline: 3px solid var(--accent); outline-offset: 2px; }
+.bokn-tile {
+  flex: 1 1 auto; min-width: 0; padding: 0.55rem 0.7rem; border: 1px solid var(--accent);
+  border-radius: 6px; background: var(--accent); color: var(--accent-ink);
+  font: 600 0.95rem var(--font-display); text-align: center; overflow-wrap: anywhere;
+  cursor: grab;
+}
+.bokn-tile[aria-pressed="true"] { outline: 3px solid var(--ink); outline-offset: 2px; }
+.bokn-field.is-locked { border-style: solid; }
+.bokn-field.is-locked .bokn-tile { cursor: default; }
+.bokn-field.is-missed { border-style: dashed; opacity: 0.8; }
+.bokn-pool {
+  display: flex; flex-wrap: wrap; gap: 0.5rem; min-height: 3.5rem; padding: 0.75rem;
+  border: 2px dashed var(--line); border-radius: 10px;
+}
+.bokn-pool .bokn-tile { flex: 0 0 auto; }
+.bokn-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin-top: 1rem; }
+.bokn-admin-category { display: grid; gap: 0.5rem; border: 1px solid var(--line); border-radius: 8px; padding: 0.75rem; }
 
 .section-title { font-size: 1.5rem; font-weight: 700; margin-bottom: 1rem; }
 .section-title a { color: inherit; }
@@ -476,12 +519,16 @@ textarea { resize: vertical; line-height: 1.6; }
 }
 .color-preview {
   padding: 1.25rem;
-  border: 1px solid var(--line);
+  border: 1px solid var(--preview-accent, var(--line));
   border-radius: 8px;
-  background: var(--preview-background, var(--surface));
+  background: var(--preview-surface, var(--preview-background, var(--surface)));
   color: var(--preview-body, var(--ink));
 }
-.color-preview h3 { margin-bottom: 0.5rem; color: var(--preview-title, var(--ink)); }
+.color-preview h3 {
+  margin-bottom: 0.5rem;
+  color: var(--preview-title, var(--ink));
+  text-decoration-color: var(--preview-accent, var(--line));
+}
 .profile-color-preview, .profile-color-preview h3 {
   color: var(--preview-text, var(--ink));
 }
@@ -514,6 +561,14 @@ textarea { resize: vertical; line-height: 1.6; }
   display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem;
   max-width: var(--measure); padding-bottom: 1.75rem;
 }
+.article-actions .like,
+.article-actions .button {
+  box-sizing: border-box; min-height: 2.9rem; padding-block: 0; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 1rem;
+}
+.article-actions .like { padding-inline: 1.1rem; }
+.article-actions .button { padding-inline: 1.1rem; }
 .author-box {
   display: flex; gap: 1rem; align-items: center; max-width: var(--measure);
   padding-block: 1.75rem 4rem; border-top: 1px solid var(--line);
@@ -524,9 +579,18 @@ textarea { resize: vertical; line-height: 1.6; }
   width: 100vw;
   margin-left: calc(50% - 50vw);
   padding-bottom: 3rem;
-  border-top: 5px solid var(--line);
-  background: #D9DD92;
-  color: #2E2836;
+  border-top: 5px solid var(--divider, #6A2E35);
+  /* Below the divider the site colours apply, not the post's custom ones */
+  --bg: #D9DD92;
+  --surface: #D3BE7A;
+  --ink: #2E2836;
+  --ink-soft: #6A2E35;
+  --line: #6A2E35;
+  --accent: #6A2E35;
+  --mark: #D3BE7A;
+  --danger: #6A2E35;
+  background: var(--bg);
+  color: var(--ink);
 }
 .comments-inner {
   display: block;
@@ -550,13 +614,13 @@ textarea { resize: vertical; line-height: 1.6; }
 }
 .comments[open] .comments-summary::before { content: "−"; }
 .comments-content { padding-bottom: 1.5rem; }
-.comments .muted, .comments .comment-meta, .comments .empty { color: #2E2836; }
-.comments .comment-meta a { color: #6A2E35; }
+.comments .muted, .comments .comment-meta, .comments .empty { color: var(--ink); }
+.comments .comment-meta a { color: var(--accent); }
 .comment-form { margin-block: 0 2.5rem; }
 .comment-list { list-style: none; margin: 0; padding: 0; }
 .comment {
   display: flex; gap: 0.8rem; padding-block: 1rem;
-  border-top: 1px solid #6A2E35;
+  border-top: 1px solid var(--line);
 }
 .comment-meta { margin: 0 0 0.35rem; font-family: var(--font-display); font-size: 0.9rem; }
 .comment-body p { margin: 0 0 0.5rem; overflow-wrap: anywhere; }

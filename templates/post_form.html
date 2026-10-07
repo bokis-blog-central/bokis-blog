@@ -45,6 +45,21 @@
           <input type="color" value="{{ background_color|default('#D9DD92', true) }}" aria-label="Choose post background color" data-color-wheel>
         </div>
       </div>
+      <div class="field-group">
+        <label for="accent-color">Post accent and border color</label>
+        <div class="color-control">
+          <input id="accent-color" name="accent_color" type="text" value="{{ accent_color|default('#6A2E35', true) }}" maxlength="7" pattern="#?[0-9A-Fa-f]{6}" required data-color-hex>
+          <input type="color" value="{{ accent_color|default('#6A2E35', true) }}" aria-label="Choose post accent and border color" data-color-wheel>
+        </div>
+      </div>
+      <div class="field-group">
+        <label for="surface-color">Post surface color</label>
+        <div class="color-control">
+          <input id="surface-color" name="surface_color" type="text" value="{{ surface_color|default('#D3BE7A', true) }}" maxlength="7" pattern="#?[0-9A-Fa-f]{6}" required data-color-hex>
+          <input type="color" value="{{ surface_color|default('#D3BE7A', true) }}" aria-label="Choose post surface color" data-color-wheel>
+        </div>
+      </div>
+      <p class="help">Accent and surface colors apply to this post and its comments. The site header and footer keep their site colors.</p>
       <aside class="color-preview" data-color-preview aria-label="Post color preview">
         <h3 data-preview-title>{{ title or 'Your post title' }}</h3>
         <p data-preview-body>{{ body or 'Your post body will use the selected body color.' }}</p>

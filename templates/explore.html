@@ -26,6 +26,18 @@
   {% set next = request.full_path.rstrip('?') %}
 
   {% if q %}
+    {% if kind in ('all', 'posts') %}
+      <section aria-labelledby="posts-title">
+        <h2 class="section-title" id="posts-title">Posts ({{ total }})</h2>
+        {% if posts %}
+          <ol class="post-list">{% for p in posts %}{{ post_row(p, next) }}{% endfor %}</ol>
+          {{ pager('explore', page, pages, {'q': q, 'type': kind, 'sort': sort}) }}
+        {% else %}
+          <p class="empty">No posts match &ldquo;{{ q }}&rdquo;. Try fewer or different words.</p>
+        {% endif %}
+      </section>
+    {% endif %}
+
     {% if kind in ('all', 'users') %}
       <section aria-labelledby="users-title">
         <h2 class="section-title" id="users-title">Users</h2>
@@ -46,19 +58,19 @@
         {% endif %}
       </section>
     {% endif %}
-
+  {% else %}
     {% if kind in ('all', 'posts') %}
-      <section aria-labelledby="posts-title">
-        <h2 class="section-title" id="posts-title">Posts ({{ total }})</h2>
+      <section aria-labelledby="all-title">
+        <h2 class="section-title" id="all-title">All posts ({{ total }})</h2>
         {% if posts %}
           <ol class="post-list">{% for p in posts %}{{ post_row(p, next) }}{% endfor %}</ol>
-          {{ pager('explore', page, pages, {'q': q, 'type': kind, 'sort': sort}) }}
+          {{ pager('explore', page, pages, {'sort': sort}) }}
         {% else %}
-          <p class="empty">No posts match &ldquo;{{ q }}&rdquo;. Try fewer or different words.</p>
+          <p class="empty">Nothing has been published yet.</p>
         {% endif %}
       </section>
     {% endif %}
-  {% else %}
+
     {% if kind in ('all', 'users') %}
       <section aria-labelledby="users-title">
         <h2 class="section-title" id="users-title">Users</h2>
@@ -76,18 +88,6 @@
           </ul>
         {% else %}
           <p class="empty">No users have joined yet.</p>
-        {% endif %}
-      </section>
-    {% endif %}
-
-    {% if kind in ('all', 'posts') %}
-      <section aria-labelledby="all-title">
-        <h2 class="section-title" id="all-title">All posts ({{ total }})</h2>
-        {% if posts %}
-          <ol class="post-list">{% for p in posts %}{{ post_row(p, next) }}{% endfor %}</ol>
-          {{ pager('explore', page, pages, {'sort': sort}) }}
-        {% else %}
-          <p class="empty">Nothing has been published yet.</p>
         {% endif %}
       </section>
     {% endif %}

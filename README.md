@@ -12,8 +12,9 @@ A small multi-user blog built with Flask and SQLite.
   4 most liked posts of the last 7 days, and the latest post by an admin.
 - Explore page: search posts (title, text, author) and users, or browse every post,
   sorted by newest or most liked.
-- Write, edit and delete your own posts. Posts support an image, custom text and
-  background colors, and comments. Admins can also delete posts.
+- Write, edit and delete your own posts. Posts support an image, custom title,
+  text, background, accent and surface colors, and comments. The site header and
+  footer keep their fixed site colors. Admins can also delete posts.
 - Choose colors with a color wheel or enter a six-digit hex code; color previews
   update as you edit.
 - Admin page: search for the featured post, create and reset the 15x15 crossword,
@@ -25,6 +26,11 @@ A small multi-user blog built with Flask and SQLite.
   until the puzzle is changed or reset, and each earned star adds to their
   cumulative Bokword victories on their profile. Crossword answers accept Latin
   and Greek letters, including accented Greek vowels.
+- Boknections, Wild Card: an admin-togglable monthly game on the home page. Drag
+  13 words into four 3-word categories plus the one wild card that fits all of
+  them. Each user has 10 checks and can check categories one at a time; correct categories lock and reveal their titles.
+  Solvers earn a flower by their username and a win on their profile. Saving a new
+  puzzle in the admin page resets attempts and flowers but keeps win counts.
 
 ## Setup
 
@@ -63,14 +69,14 @@ Do not use it on a real site.
 | `SIGNUP_PASSWORD` | Initial signup password. Only read the first time the database is created. Change it later on the Admin page. |
 | `SECRET_KEY` | Required, stable cookie-signing key of at least 32 bytes. Set locally in `.env` and in Render's environment settings. |
 | `SITE_NAME` | Name shown in the header. Default: Boki.blog. |
-| `BLOG_DATA_DIR` | Directory for the database and uploads. Default: `instance/`; set to `/var/data` when deploying with the included Render disk. |
+| `BLOG_DATA_DIR` | Directory for the database and uploads. Default: `instance/`; set to `/opt/render/project/src/instance` when deploying with the included Render disk. |
 | `BLOG_DB` | Optional explicit path to the SQLite file. Default: `<BLOG_DATA_DIR>/blog.db`. |
 | `BLOG_HTTPS` | Set to `1` when serving over HTTPS so cookies are marked secure. |
 
 ## Putting it online
 
 The included `render.yaml` configures a paid Render web service, Gunicorn, HTTPS
-cookies, and a persistent disk at `/var/data` for the SQLite database and uploaded
+cookies, and a persistent disk at `/opt/render/project/src/instance` for the SQLite database and uploaded
 images. Connect the repository to Render as a Blueprint. When prompted, enter the
 `SECRET_KEY` and `SIGNUP_PASSWORD` values from your local `.env`; Render stores
 these as service environment variables. Do not commit `.env`.
@@ -79,7 +85,7 @@ After the first deploy, open the service Shell and run
 `flask --app app create-admin yourname` to create the admin account. The service
 starts with a new database on its persistent disk. If you need to bring over
 existing local posts or images, copy the local database and `instance/uploads/`
-into the mounted `/var/data` disk before creating the admin account.
+into the mounted instance directory before creating the admin account.
 
 The log-in and signup-password throttling is kept in memory and per process, which is
 fine for a small site on one process.

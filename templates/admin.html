@@ -69,6 +69,41 @@
     {% endif %}
   </section>
 
+  <section class="admin-block" id="boknections" aria-labelledby="boknections-title">
+    <h2 id="boknections-title">Boknections, Wild Card (monthly)</h2>
+    <p class="help">Four categories of three words, plus one wild card word that fits every category. Players get 10 attempts; winners earn a flower by their name and a win on their profile. Changing the puzzle resets attempts and flowers.</p>
+    <form method="post" action="{{ url_for('admin_toggle_boknections') }}" class="actions">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="enabled" value="{{ '0' if boknections_on else '1' }}">
+      <p class="help"><strong>Status:</strong> {{ 'Shown on the home page' if boknections_on else 'Hidden' }}.</p>
+      <button class="button {{ 'secondary' if boknections_on else '' }}" type="submit">{{ 'Disable game' if boknections_on else 'Enable game' }}</button>
+    </form>
+    <form method="post" action="{{ url_for('admin_save_boknections') }}" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      {% for i in range(1, 5) %}
+        {% set cat = boknections_puzzle.categories[i - 1] if boknections_puzzle else none %}
+        <fieldset class="bokn-admin-category">
+          <legend>Category {{ i }}</legend>
+          <div class="field-group">
+            <label for="cat{{ i }}_title">Title (revealed when solved)</label>
+            <input id="cat{{ i }}_title" name="cat{{ i }}_title" type="text" maxlength="60" required value="{{ cat.title if cat else '' }}">
+          </div>
+          {% for j in range(1, 4) %}
+            <div class="field-group">
+              <label for="cat{{ i }}_word{{ j }}">Word {{ j }}</label>
+              <input id="cat{{ i }}_word{{ j }}" name="cat{{ i }}_word{{ j }}" type="text" maxlength="40" required value="{{ cat.words[j - 1] if cat else '' }}">
+            </div>
+          {% endfor %}
+        </fieldset>
+      {% endfor %}
+      <div class="field-group">
+        <label for="wild">Wild card (fits all four categories)</label>
+        <input id="wild" name="wild" type="text" maxlength="40" required value="{{ boknections_puzzle.wild if boknections_puzzle else '' }}">
+      </div>
+      <div class="actions"><button class="button" type="submit">{{ 'Save puzzle' if boknections_puzzle else 'Publish puzzle' }}</button></div>
+    </form>
+  </section>
+
   <section class="admin-block" aria-labelledby="pw-title">
     <h2 id="pw-title">Signup password</h2>
     <p class="help">New visitors need this password before they can see the sign-up form. Share it only with people you want to invite.</p>
