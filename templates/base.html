@@ -22,7 +22,7 @@
           <li><a href="{{ url_for('explore') }}" {% if request.endpoint == 'explore' %}aria-current="page"{% endif %}>Explore</a></li>
           {% if g.user %}
             <li><a href="{{ url_for('new_post') }}" {% if request.endpoint == 'new_post' %}aria-current="page"{% endif %}>Write</a></li>
-            <li><a href="{{ url_for('profile', username=g.user.username) }}">{{ user_name(g.user.username, g.user.crossword_star) }}</a></li>
+            <li><a href="{{ url_for('profile', username=g.user.username) }}" {% if request.endpoint == 'profile' and (request.view_args or {}).get('username') == g.user.username %}aria-current="page"{% endif %}>{{ user_name(g.user.username, g.user.crossword_star) }}</a></li>
             <li><a href="{{ url_for('account_settings') }}" {% if request.endpoint == 'account_settings' %}aria-current="page"{% endif %}>Settings</a></li>
             {% if g.user.is_admin %}
               <li><a href="{{ url_for('admin') }}" {% if request.endpoint == 'admin' %}aria-current="page"{% endif %}>Admin</a></li>

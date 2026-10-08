@@ -34,7 +34,7 @@
 
   <section class="admin-block" id="crossword" aria-labelledby="crossword-title">
     <h2 id="crossword-title">Weekly Bokword crossword</h2>
-    <p class="help">Enter Latin or Greek letters in answer cells and use # for blocked cells. To remove a block, focus its square and press Backspace or Delete; the empty square stays open so you can enter its answer letter. Clue starts and answer ends are determined by the grid. Changing the published puzzle clears its previous solver stars.</p>
+    <p class="help">Enter Latin or Greek letters in answer cells and use # for blocked cells. To remove a block, focus its square and press Backspace or Delete. The empty square stays open so you can enter its answer letter. Clue starts and answer ends are determined by the grid. Changing the published puzzle clears its previous solver stars.</p>
     <form method="post" action="{{ url_for('admin_save_crossword') }}" class="stack" data-admin-crossword-form>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="admin-crossword-grid" role="group" aria-label="15 by 15 crossword solution editor" data-admin-crossword-grid>
@@ -71,7 +71,7 @@
 
   <section class="admin-block" id="boknections" aria-labelledby="boknections-title">
     <h2 id="boknections-title">Boknections, Wild Card (monthly)</h2>
-    <p class="help">Four categories of three words, plus one wild card word that fits every category. Players get 10 attempts; winners earn a flower by their name and a win on their profile. Changing the puzzle resets attempts and flowers.</p>
+    <p class="help">Four categories of three words, plus one wild card word that fits every category. Players get 10 attempts. Winners earn a flower by their name and a win on their profile. Changing the puzzle resets attempts and flowers.</p>
     <form method="post" action="{{ url_for('admin_toggle_boknections') }}" class="actions">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="enabled" value="{{ '0' if boknections_on else '1' }}">
