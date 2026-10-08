@@ -12,6 +12,7 @@
       <li><time datetime="{{ post.created_at|iso }}">{{ post.created_at|date }}</time></li>
       {% if post.updated_at %}<li>edited {{ post.updated_at|date }}</li>{% endif %}
       <li>{{ post.body|wordcount }} {{ 'word' if (post.body|wordcount) == 1 else 'words' }}</li>
+      <li><a href="#comments">{{ post.comment_count }} {{ 'comment' if post.comment_count == 1 else 'comments' }}</a></li>
       {% if is_featured %}<li><span class="tag">Featured this week</span></li>{% endif %}
     </ul>
   </header>
@@ -61,11 +62,15 @@
     </summary>
     <div class="comments-inner comments-content">
       {% if g.user %}
-        <form method="post" action="{{ url_for('add_comment', post_id=post.id) }}" class="stack comment-form">
+        <form method="post" action="{{ url_for('add_comment', post_id=post.id) }}" class="stack comment-form" enctype="multipart/form-data">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <div class="field-group">
             <label for="comment-body">Share your thoughts</label>
-            <textarea id="comment-body" name="body" rows="4" maxlength="3000" required></textarea>
+            <textarea id="comment-body" name="body" rows="4" maxlength="3000"></textarea>
+          </div>
+          <div class="field-group">
+            <label for="comment-image">Image (optional)</label>
+            <input id="comment-image" type="file" name="image" accept="image/png,image/jpeg,image/gif,image/webp">
           </div>
           <div class="actions"><button class="button" type="submit">Add comment</button></div>
         </form>
@@ -74,16 +79,56 @@
       {% endif %}
       {% if comments %}
         <ol class="comment-list">
-          {% for comment in comments %}
-            <li class="comment">
+          {% for item in comments %}
+            {% set comment = item.row %}
+            {% set is_deleted = comment.username == coward %}
+            {% set can_manage = g.user and (g.user.id == comment.user_id or g.user.is_admin) %}
+            <li class="comment depth-{{ item.depth }}" id="comment-{{ comment.id }}">
               {% if comment.avatar %}
                 <img class="avatar small" src="{{ url_for('uploaded_file', filename=comment.avatar) }}" alt="" style="object-position: {{ comment.avatar_position_x }}% {{ comment.avatar_position_y }}%;">
               {% else %}
                 <span class="avatar small" aria-hidden="true">{{ comment.username[:2]|upper }}</span>
               {% endif %}
-              <div>
-                <p class="comment-meta"><a href="{{ url_for('profile', username=comment.username) }}">{{ user_name(comment.username, comment.crossword_star) }}</a> · <time datetime="{{ comment.created_at|iso }}">{{ comment.created_at|date }}</time></p>
-                <div class="comment-body">{{ comment.body|paragraphs }}</div>
+              <div class="comment-main">
+                <p class="comment-meta"><a href="{{ url_for('profile', username=comment.username) }}">{{ user_name(comment.username, comment.crossword_star) }}</a> · <time datetime="{{ comment.created_at|iso }}">{{ comment.created_at|date }}</time>{% if comment.edited_at %} · edited{% endif %}</p>
+                <div class="comment-body{% if is_deleted %} deleted{% endif %}">{{ comment.body|paragraphs }}</div>
+                {% if comment.image %}
+                  <img class="comment-image" src="{{ url_for('uploaded_file', filename=comment.image) }}" alt="Image attached to comment by {{ comment.username }}">
+                {% endif %}
+                <div class="comment-actions">
+                  {% if g.user %}
+                    <details class="comment-popup">
+                      <summary class="button secondary small">Reply</summary>
+                      <form method="post" action="{{ url_for('add_comment', post_id=post.id) }}" class="stack" enctype="multipart/form-data">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="parent_id" value="{{ comment.id }}">
+                        <textarea name="body" rows="3" maxlength="3000" aria-label="Reply to {{ comment.username }}"></textarea>
+                        <input type="file" name="image" accept="image/png,image/jpeg,image/gif,image/webp" aria-label="Reply image">
+                        <div class="actions"><button class="button small" type="submit">Post reply</button> <button class="button secondary small" type="button" data-close-details>Cancel</button></div>
+                      </form>
+                    </details>
+                  {% endif %}
+                  {% if can_manage and not is_deleted %}
+                    <details class="comment-popup">
+                      <summary class="button secondary small">Edit</summary>
+                      <form method="post" action="{{ url_for('edit_comment', comment_id=comment.id) }}" class="stack" enctype="multipart/form-data">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <textarea name="body" rows="3" maxlength="3000" aria-label="Edit comment">{{ comment.body }}</textarea>
+                        <input type="file" name="image" accept="image/png,image/jpeg,image/gif,image/webp" aria-label="Replace image">
+                        {% if comment.image %}
+                          <label class="check"><input type="checkbox" name="remove_image" value="1"> Remove current image</label>
+                        {% endif %}
+                        <div class="actions"><button class="button small" type="submit">Save</button></div>
+                      </form>
+                    </details>
+                  {% endif %}
+                  {% if can_manage %}
+                    <form class="inline-form" method="post" action="{{ url_for('delete_comment', comment_id=comment.id) }}">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <button class="button danger small" type="submit">Delete</button>
+                    </form>
+                  {% endif %}
+                </div>
               </div>
             </li>
           {% endfor %}

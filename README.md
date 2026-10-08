@@ -15,6 +15,10 @@ A small multi-user blog built with Flask and SQLite.
 - Write, edit and delete your own posts. Posts support an image, custom title,
   text, background, accent and surface colors, and comments. The site header and
   footer keep their fixed site colors. Admins can also delete posts.
+- Comments support an optional image, threaded replies, and a per-post comment
+  count. Authors and admins can edit or delete comments. Deleting a comment that
+  has replies keeps the replies: the comment becomes "I deleted my comment" by the
+  placeholder user "Coward" (password `IDELETECOMMENT`).
 - Choose colors with a color wheel or enter a six-digit hex code; color previews
   update as you edit.
 - Admin page: search for the featured post, create and reset the 15x15 crossword,

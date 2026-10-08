@@ -12,9 +12,11 @@
       <div class="avatar big" aria-hidden="true">{{ profile_user.username[:2]|upper }}</div>
     {% endif %}
     <div>
-      <h1 class="page-title">{{ user_name(profile_user.username, profile_user.crossword_star) }}</h1>
+      <h1 class="page-title">{% if profile_user.username == coward %}{{ profile_user.username }}{% else %}{{ user_name(profile_user.username, profile_user.crossword_star) }}{% endif %}</h1>
+      {% if profile_user.username != coward %}
       <p class="muted">Joined {{ profile_user.created_at|date }}. {{ total }} {{ 'post' if total == 1 else 'posts' }}, {{ total_likes }} {{ 'like' if total_likes == 1 else 'likes' }} received.</p>
       <p class="muted">{{ profile_user.bokword_victories }} Bokword {{ 'victory' if profile_user.bokword_victories == 1 else 'victories' }}. {{ profile_user.boknections_victories }} Boknections {{ 'victory' if profile_user.boknections_victories == 1 else 'victories' }}.</p>
+      {% endif %}
       {% if profile_user.bio %}<p class="profile-bio">{{ profile_user.bio }}</p>{% endif %}
     </div>
   </header>

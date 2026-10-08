@@ -45,7 +45,7 @@
           <ul class="user-list">
             {% for u in users %}
               <li>
-                <span class="avatar small" aria-hidden="true">{{ u.username[:2]|upper }}</span>
+                {% if u.avatar %}<img class="avatar small" src="{{ url_for('uploaded_file', filename=u.avatar) }}" alt="" style="object-position: {{ u.avatar_position_x }}% {{ u.avatar_position_y }}%;">{% else %}<span class="avatar small" aria-hidden="true">{{ u.username[:2]|upper }}</span>{% endif %}
                 <div>
                   <a href="{{ url_for('profile', username=u.username) }}">{{ user_name(u.username, u.crossword_star) }}</a>
                   <span class="muted">{{ u.post_count }} {{ 'post' if u.post_count == 1 else 'posts' }}, joined {{ u.created_at|date }}</span>
@@ -78,7 +78,7 @@
           <ul class="user-list">
             {% for u in users %}
               <li>
-                <span class="avatar small" aria-hidden="true">{{ u.username[:2]|upper }}</span>
+                {% if u.avatar %}<img class="avatar small" src="{{ url_for('uploaded_file', filename=u.avatar) }}" alt="" style="object-position: {{ u.avatar_position_x }}% {{ u.avatar_position_y }}%;">{% else %}<span class="avatar small" aria-hidden="true">{{ u.username[:2]|upper }}</span>{% endif %}
                 <div>
                   <a href="{{ url_for('profile', username=u.username) }}">{{ user_name(u.username, u.crossword_star) }}</a>
                   <span class="muted">{{ u.post_count }} {{ 'post' if u.post_count == 1 else 'posts' }}, joined {{ u.created_at|date }}</span>

@@ -638,6 +638,23 @@ textarea { resize: vertical; line-height: 1.6; }
 }
 .comment-meta { margin: 0 0 0.35rem; font-family: var(--font-display); font-size: 0.9rem; }
 .comment-body p { margin: 0 0 0.5rem; overflow-wrap: anywhere; }
+.comment-main { flex: 1; min-width: 0; }
+.comment.depth-1 { margin-left: 1.5rem; }
+.comment.depth-2 { margin-left: 3rem; }
+.comment.depth-3 { margin-left: 4.5rem; }
+.comment-body.deleted { font-style: italic; opacity: 0.75; }
+.comment-image { display: block; max-width: min(100%, 24rem); max-height: 20rem; border-radius: 6px; margin-bottom: 0.5rem; }
+.comment-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: flex-start; }
+.comment-actions .button.small {
+  box-sizing: border-box; height: 2rem; padding: 0 0.7rem; font-size: 0.85rem;
+  line-height: 1; display: inline-flex; align-items: center; margin: 0;
+}
+.comment-actions .inline-form { display: inline-flex; }
+.comment-popup > summary { list-style: none; cursor: pointer; }
+.comment-popup > summary::-webkit-details-marker { display: none; }
+.comment-popup[open] { flex-basis: 100%; }
+.comment-popup form { margin-top: 0.5rem; }
+@media (max-width: 600px) { .comment.depth-2, .comment.depth-3 { margin-left: 1.5rem; } }
 .danger-zone { border-color: var(--danger); }
 
 /* ---------- Admin ---------- */

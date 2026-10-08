@@ -30,6 +30,7 @@
       <ul class="meta">
         <li>by <a href="{{ url_for('profile', username=post.username) }}">{{ user_name(post.username, post.crossword_star) }}</a></li>
         <li>{{ post.body|wordcount }} {{ 'word' if (post.body|wordcount) == 1 else 'words' }}</li>
+        <li><a href="{{ url_for('post', post_id=post.id) }}#comments">{{ post.comment_count }} {{ 'comment' if post.comment_count == 1 else 'comments' }}</a></li>
         <li>{{ like_button(post, next) }}</li>
       </ul>
     </div>

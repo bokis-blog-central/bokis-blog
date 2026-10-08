@@ -1,4 +1,13 @@
 const HEX_COLOR = /^#?[0-9a-f]{6}$/i;
+
+document.addEventListener("click", (event) => {
+  const cancel = event.target.closest("[data-close-details]");
+  if (!cancel) return;
+  const details = cancel.closest("details");
+  if (!details) return;
+  details.querySelector("form")?.reset();
+  details.open = false;
+});
 const CROSSWORD_CELL_CHARACTERS = /[^A-ZΑ-ΡΣ-ΩΆΈΉΊΌΎΏΪΫ#]/gu;
 
 function normalizeCrosswordCell(value) {

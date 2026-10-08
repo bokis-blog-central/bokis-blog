@@ -116,7 +116,10 @@ CREATE TABLE IF NOT EXISTS comments (
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     post_id    INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
     body       TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    image      TEXT,
+    parent_id  INTEGER REFERENCES comments(id) ON DELETE SET NULL,
+    edited_at  TEXT
 );
 CREATE INDEX IF NOT EXISTS comments_post_time ON comments(post_id, created_at);
 
@@ -160,6 +163,11 @@ CREATE TABLE IF NOT EXISTS boknections_progress (
 """
 
 
+COWARD_USERNAME = "Coward"
+COWARD_PASSWORD = "IDELETECOMMENT"
+DELETED_COMMENT_TEXT = "I deleted my comment"
+
+
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA journal_mode = WAL")
@@ -191,6 +199,11 @@ def init_db():
         "crossword_completions": {
             "guess": "TEXT",
         },
+        "comments": {
+            "image": "TEXT",
+            "parent_id": "INTEGER REFERENCES comments(id) ON DELETE SET NULL",
+            "edited_at": "TEXT",
+        },
     }
     for table, columns in migrations.items():
         existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
@@ -205,6 +218,11 @@ def init_db():
             "UPDATE users SET bokword_victories = ("
             "SELECT COUNT(*) FROM crossword_completions c "
             "WHERE c.user_id = users.id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS comments_parent ON comments(parent_id)")
+    if not conn.execute(
+            "SELECT 1 FROM users WHERE username = ?", (COWARD_USERNAME,)).fetchone():
+        conn.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)",
+                     (COWARD_USERNAME, generate_password_hash(COWARD_PASSWORD)))
     has_pw = conn.execute(
         "SELECT 1 FROM settings WHERE key = 'signup_password_hash'").fetchone()
     if not has_pw:
@@ -267,6 +285,7 @@ POST_COLS = """
     u.avatar_position_y AS author_avatar_y, p.image, p.text_color, p.title_color,
     p.background_color, p.accent_color, p.surface_color, p.button_text_color,
     (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) AS like_count,
+    (SELECT COUNT(*) FROM comments cm WHERE cm.post_id = p.id) AS comment_count,
     EXISTS(SELECT 1 FROM likes l WHERE l.post_id = p.id AND l.user_id = ?) AS liked
 """
 POST_FROM = "FROM posts p JOIN users u ON u.id = p.user_id"
@@ -805,7 +824,8 @@ def explore():
         pattern = like_pattern(q)
         if kind in ("all", "users"):
             users = db().execute(
-                """SELECT u.username, u.created_at,
+                """SELECT u.username, u.created_at, u.avatar,
+                          u.avatar_position_x, u.avatar_position_y,
                           EXISTS(
                             SELECT 1 FROM crossword_completions c
                             JOIN crossword_state s ON s.id = 1
@@ -813,17 +833,21 @@ def explore():
                           ) AS crossword_star,
                           (SELECT COUNT(*) FROM posts WHERE user_id = u.id) AS post_count
                    FROM users u WHERE u.username LIKE ? ESCAPE '\\'
-                   ORDER BY u.username LIMIT 20""", (pattern,)).fetchall()
+                     AND (u.username <> ? COLLATE NOCASE OR u.username = ? COLLATE NOCASE)
+                   ORDER BY u.username LIMIT 20""",
+                (pattern, COWARD_USERNAME, q.strip())).fetchall()
         if kind in ("all", "posts"):
             posts, total, page, pages = fetch_posts(
                 "(p.title LIKE ? ESCAPE '\\' OR p.body LIKE ? ESCAPE '\\' "
-                "OR u.username LIKE ? ESCAPE '\\')",
-                (pattern, pattern, pattern), sort, page)
+                "OR u.username LIKE ? ESCAPE '\\') "
+                "AND (u.username <> ? COLLATE NOCASE OR u.username = ? COLLATE NOCASE)",
+                (pattern, pattern, pattern, COWARD_USERNAME, q.strip()), sort, page)
     else:
         # Show users when search is empty
         if kind in ("all", "users"):
             users = db().execute(
-                """SELECT u.username, u.created_at,
+                """SELECT u.username, u.created_at, u.avatar,
+                          u.avatar_position_x, u.avatar_position_y,
                           EXISTS(
                             SELECT 1 FROM crossword_completions c
                             JOIN crossword_state s ON s.id = 1
@@ -831,9 +855,12 @@ def explore():
                           ) AS crossword_star,
                           (SELECT COUNT(*) FROM posts WHERE user_id = u.id) AS post_count
                    FROM users u
-                   ORDER BY u.username LIMIT 20""").fetchall()
+                   WHERE u.username <> ? COLLATE NOCASE
+                   ORDER BY u.username LIMIT 20""", (COWARD_USERNAME,)).fetchall()
         if kind in ("all", "posts"):
-            posts, total, page, pages = fetch_posts(sort=sort, page=page)
+            posts, total, page, pages = fetch_posts(
+                "u.username <> ? COLLATE NOCASE", (COWARD_USERNAME,),
+                sort=sort, page=page)
 
     return render_template("explore.html", q=q, kind=kind, sort=sort, users=users,
                            posts=posts, total=total, page=page, pages=pages)
@@ -845,8 +872,9 @@ def post(post_id):
     if row is None:
         abort(404)
     is_featured = get_setting("featured_post_id") == str(post_id)
-    comments = db().execute(
-        """SELECT c.id, c.body, c.created_at, u.username, u.avatar,
+    rows = db().execute(
+        """SELECT c.id, c.body, c.created_at, c.image, c.parent_id, c.edited_at,
+                  c.user_id, u.username, u.avatar,
                   u.avatar_position_x, u.avatar_position_y,
                   EXISTS(
                     SELECT 1 FROM crossword_completions x
@@ -855,8 +883,21 @@ def post(post_id):
                   ) AS crossword_star
            FROM comments c JOIN users u ON u.id = c.user_id
            WHERE c.post_id = ? ORDER BY c.created_at, c.id""", (post_id,)).fetchall()
+    ids = {r["id"] for r in rows}
+    children = {}
+    for r in rows:
+        key = r["parent_id"] if r["parent_id"] in ids else None
+        children.setdefault(key, []).append(r)
+    comments = []
+
+    def walk(parent, depth):
+        for r in children.get(parent, []):
+            comments.append({"row": r, "depth": min(depth, 3)})
+            walk(r["id"], depth + 1)
+
+    walk(None, 0)
     return render_template("post.html", post=row, is_featured=is_featured,
-                           comments=comments)
+                           comments=comments, coward=COWARD_USERNAME)
 
 
 @app.get("/u/<username>")
@@ -880,7 +921,8 @@ def profile(username):
         "SELECT COUNT(*) FROM likes l JOIN posts p ON p.id = l.post_id "
         "WHERE p.user_id = ?", (user["id"],)).fetchone()[0]
     return render_template("profile.html", profile_user=user, posts=posts,
-                           total=total, total_likes=total_likes, page=page, pages=pages)
+                           total=total, total_likes=total_likes, page=page, pages=pages,
+                           coward=COWARD_USERNAME)
 
 
 @app.get("/uploads/<path:filename>")
@@ -1026,11 +1068,16 @@ def delete_post(post_id):
     if row["user_id"] != g.user["id"] and not g.user["is_admin"]:
         abort(403, "You can only delete your own posts.")
     image = row["image"]
+    comment_images = [r[0] for r in db().execute(
+        "SELECT image FROM comments WHERE post_id = ? AND image IS NOT NULL",
+        (post_id,))]
     db().execute("DELETE FROM posts WHERE id = ?", (post_id,))
     if get_setting("featured_post_id") == str(post_id):
         db().execute("DELETE FROM settings WHERE key = 'featured_post_id'")
     db().commit()
     remove_uploaded_image(image)
+    for filename in comment_images:
+        remove_uploaded_image(filename)
     flash("Post deleted.", "ok")
     return redirect(url_for("profile", username=row["username"]))
 
@@ -1064,23 +1111,127 @@ def toggle_like(post_id):
                     or url_for("post", post_id=post_id))
 
 
+def comment_input(allow_empty_body=False):
+    body = request.form.get("body", "").strip()
+    error = None
+    image_data = None
+    try:
+        image_data = read_uploaded_image(request.files.get("image"))
+    except ValueError as exc:
+        error = str(exc)
+    if error is None:
+        if len(body) > 3000:
+            error = "Comments can be at most 3,000 characters."
+        elif not body and not image_data and not allow_empty_body:
+            error = "Write a comment or attach an image before submitting."
+    return body, image_data, error
+
+
+def get_comment(comment_id):
+    row = db().execute(
+        "SELECT c.*, u.username FROM comments c JOIN users u ON u.id = c.user_id "
+        "WHERE c.id = ?", (comment_id,)).fetchone()
+    if row is None:
+        abort(404)
+    return row
+
+
+def coward_id():
+    return db().execute(
+        "SELECT id FROM users WHERE username = ?", (COWARD_USERNAME,)).fetchone()[0]
+
+
 @app.post("/post/<int:post_id>/comments")
 @login_required
 def add_comment(post_id):
     if get_post(post_id) is None:
         abort(404)
-    body = request.form.get("body", "").strip()
-    if not body:
-        flash("Write a comment before submitting.", "error")
-    elif len(body) > 3000:
-        flash("Comments can be at most 3,000 characters.", "error")
+    parent_id = request.form.get("parent_id", type=int)
+    if parent_id is not None:
+        parent = db().execute(
+            "SELECT post_id FROM comments WHERE id = ?", (parent_id,)).fetchone()
+        if parent is None or parent["post_id"] != post_id:
+            abort(400, "That comment can't be replied to.")
+    body, image_data, error = comment_input()
+    if error:
+        flash(error, "error")
     else:
-        db().execute(
-            "INSERT INTO comments (user_id, post_id, body) VALUES (?, ?, ?)",
-            (g.user["id"], post_id, body))
+        image = store_uploaded_image(image_data) if image_data else None
+        cursor = db().execute(
+            "INSERT INTO comments (user_id, post_id, body, image, parent_id) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (g.user["id"], post_id, body, image, parent_id))
         db().commit()
-        flash("Comment added.", "ok")
+        flash("Reply added." if parent_id else "Comment added.", "ok")
+        return redirect(url_for("post", post_id=post_id) + f"#comment-{cursor.lastrowid}")
     return redirect(url_for("post", post_id=post_id) + "#comments")
+
+
+@app.post("/comment/<int:comment_id>/edit")
+@login_required
+def edit_comment(comment_id):
+    row = get_comment(comment_id)
+    if row["user_id"] != g.user["id"] and not g.user["is_admin"]:
+        abort(403, "You can only edit your own comments.")
+    if row["username"] == COWARD_USERNAME:
+        abort(403, "Deleted comments can't be edited.")
+    body, image_data, error = comment_input(allow_empty_body=True)
+    new_image = None
+    if error is None:
+        keeps_image = bool(row["image"]) and request.form.get("remove_image") != "1"
+        if not body and not image_data and not keeps_image:
+            error = "A comment needs text or an image."
+    if error:
+        flash(error, "error")
+        return redirect(url_for("post", post_id=row["post_id"]) + f"#comment-{comment_id}")
+    image = row["image"]
+    if image_data:
+        new_image = store_uploaded_image(image_data)
+        image = new_image
+    elif request.form.get("remove_image") == "1":
+        image = None
+    db().execute(
+        "UPDATE comments SET body = ?, image = ?, edited_at = datetime('now') "
+        "WHERE id = ?", (body, image, comment_id))
+    db().commit()
+    if row["image"] and row["image"] != image:
+        remove_uploaded_image(row["image"])
+    flash("Comment updated.", "ok")
+    return redirect(url_for("post", post_id=row["post_id"]) + f"#comment-{comment_id}")
+
+
+@app.post("/comment/<int:comment_id>/delete")
+@login_required
+def delete_comment(comment_id):
+    row = get_comment(comment_id)
+    if row["user_id"] != g.user["id"] and not g.user["is_admin"]:
+        abort(403, "You can only delete your own comments.")
+    has_replies = db().execute(
+        "SELECT 1 FROM comments WHERE parent_id = ?", (comment_id,)).fetchone()
+    if has_replies:
+        db().execute(
+            "UPDATE comments SET user_id = ?, body = ?, image = NULL, "
+            "edited_at = NULL WHERE id = ?",
+            (coward_id(), DELETED_COMMENT_TEXT, comment_id))
+    else:
+        parent_id = row["parent_id"]
+        db().execute("DELETE FROM comments WHERE id = ?", (comment_id,))
+        # Drop placeholder ancestors that no longer have any replies.
+        while parent_id is not None:
+            parent = db().execute(
+                "SELECT c.id, c.parent_id, c.image, u.username FROM comments c "
+                "JOIN users u ON u.id = c.user_id WHERE c.id = ?",
+                (parent_id,)).fetchone()
+            if parent is None or parent["username"] != COWARD_USERNAME or \
+                    db().execute("SELECT 1 FROM comments WHERE parent_id = ?",
+                                 (parent["id"],)).fetchone():
+                break
+            db().execute("DELETE FROM comments WHERE id = ?", (parent["id"],))
+            parent_id = parent["parent_id"]
+    db().commit()
+    remove_uploaded_image(row["image"])
+    flash("Comment deleted.", "ok")
+    return redirect(url_for("post", post_id=row["post_id"]) + "#comments")
 
 
 # ----------------------------------------------------------------------
@@ -1223,6 +1374,10 @@ def delete_account():
     post_rows = db().execute(
         "SELECT id, image FROM posts WHERE user_id = ?", (g.user["id"],)).fetchall()
     filenames = [row["avatar"]] + [post["image"] for post in post_rows]
+    filenames += [r[0] for r in db().execute(
+        "SELECT image FROM comments WHERE image IS NOT NULL AND "
+        "(user_id = ? OR post_id IN (SELECT id FROM posts WHERE user_id = ?))",
+        (g.user["id"], g.user["id"]))]
     post_ids = [str(post["id"]) for post in post_rows]
     if post_ids:
         placeholders = ",".join("?" for _ in post_ids)
