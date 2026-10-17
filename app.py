@@ -360,6 +360,49 @@ def crossword_entries(solution):
     return across_entries + down_entries
 
 
+CONN_TAG_RE = re.compile(r"~!conn([AD])(\d+)")
+CONN_PLACEHOLDER = Markup(
+    '<span class="conn-paren">(</span>🐍<span class="conn-paren">)</span>')
+
+
+def render_hint(hint):
+    """Escape a hint and swap each ~!conn tag for the snake placeholder."""
+    parts = CONN_TAG_RE.split(hint)
+    # split() with two capture groups yields text, letter, number, text, ...
+    return Markup("").join(
+        escape(part) if i % 3 == 0 else CONN_PLACEHOLDER if i % 3 == 1 else ""
+        for i, part in enumerate(parts))
+
+
+def crossword_connections(entries, clues):
+    """Map owner entry key -> connected entry key, from ~!conn tags in hints.
+
+    Returns (connections, error message or None).
+    """
+    by_code = {
+        ("A" if e["direction"] == "across" else "D", e["number"]): e
+        for e in entries
+    }
+    connections = {}
+    for entry in entries:
+        tags = CONN_TAG_RE.findall(clues.get(entry["key"], ""))
+        if not tags:
+            continue
+        if len(tags) > 1:
+            return None, "A hint can contain only one ~!conn tag."
+        letter, number = tags[0]
+        target = by_code.get((letter, int(number)))
+        if target is None:
+            return None, f"Connection ~!conn{letter}{number} does not match an answer."
+        if target["direction"] == entry["direction"]:
+            return None, "A connection must join an across answer with a down answer."
+        connections[entry["key"]] = target["key"]
+    targets = list(connections.values())
+    if len(set(targets)) != len(targets) or set(targets) & set(connections):
+        return None, "Each answer can be connected only once, and a connected answer cannot own a connection."
+    return connections, None
+
+
 def normalize_crossword_text(text):
     uppercase = unicodedata.normalize("NFC", text).upper()
     return uppercase.replace("Ι\u0308\u0301", "Ϊ").replace("Υ\u0308\u0301", "Ϋ")
@@ -405,14 +448,23 @@ def validate_crossword(solution_text, clues_text):
     if not isinstance(clues, dict):
         return None, None, "The clue data is invalid."
     expected_keys = {entry["key"] for entry in entries}
+    if set(clues) != expected_keys or any(
+            not isinstance(hint, str) for hint in clues.values()):
+        return None, None, "The grid changed; check the generated clues and try saving again."
+    stripped = {key: hint.strip() for key, hint in clues.items()}
+    connections, conn_error = crossword_connections(entries, stripped)
+    if conn_error:
+        return None, None, conn_error
+    connected_targets = set(connections.values())
     normalized_clues = {}
     for key in expected_keys:
-        hint = clues.get(key)
-        if not isinstance(hint, str) or not hint.strip() or len(hint.strip()) > 200:
+        hint = stripped[key]
+        if key in connected_targets and not hint:
+            normalized_clues[key] = ""
+            continue
+        if not hint or len(hint) > 200:
             return None, None, "Provide a hint of at most 200 characters for every answer."
-        normalized_clues[key] = hint.strip()
-    if set(clues) != expected_keys:
-        return None, None, "The grid changed; check the generated clues and try saving again."
+        normalized_clues[key] = hint
     return solution, normalized_clues, None
 
 
@@ -776,6 +828,7 @@ def home():
     crossword_entries_list = []
     crossword_completed = False
     crossword_answers = ""
+    connected_cells = set()
     if crossword:
         crossword_entries_list = crossword_entries(crossword["solution"]) or []
         if g.user:
@@ -787,8 +840,32 @@ def home():
             if completion:
                 crossword_answers = completion["guess"] or crossword["solution"]
     if crossword:
+        connections, _ = crossword_connections(
+            crossword_entries_list, crossword["clues"])
+        connections = connections or {}
+        owner_of = {target: owner for owner, target in connections.items()}
+        by_key = {e["key"]: e for e in crossword_entries_list}
         for entry in crossword_entries_list:
-            entry["hint"] = crossword["clues"].get(entry["key"], "")
+            hint = render_hint(crossword["clues"].get(entry["key"], ""))
+            entry["hint"] = hint
+            entry["hidden"] = entry["key"] in owner_of
+            entry["role"] = ("owner" if entry["key"] in connections
+                             else "target" if entry["key"] in owner_of else "")
+            entry["partner"] = (connections.get(entry["key"])
+                                or owner_of.get(entry["key"]))
+            owner = owner_of.get(entry["key"])
+            entry["display_number"] = (by_key[owner]["number"] if owner
+                                       else entry["number"])
+            entry["lengths"] = str(entry["length"])
+            if entry["key"] in connections:
+                entry["lengths"] += ", " + str(
+                    by_key[connections[entry["key"]]]["length"])
+        for entry in crossword_entries_list:
+            if entry["partner"]:
+                step = 1 if entry["direction"] == "across" else 15
+                start = entry["row"] * 15 + entry["col"]
+                connected_cells.update(
+                    start + step * i for i in range(entry["length"]))
 
     boknections = None
     if boknections_enabled():
@@ -804,6 +881,7 @@ def home():
                            boknections=boknections,
                            crossword=crossword,
                            crossword_entries=crossword_entries_list,
+                           crossword_connected_cells=connected_cells,
                            crossword_completed=crossword_completed,
                            crossword_answers=crossword_answers)
 

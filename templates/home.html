@@ -44,13 +44,13 @@
                   |selectattr('row', 'equalto', row)
                   |selectattr('col', 'equalto', col)
                   |list %}
-                <label class="crossword-square{% if crossword_completed %} is-revealed{% endif %}"
+                <label class="crossword-square{% if crossword_completed %} is-revealed{% endif %}{% if index in crossword_connected_cells %} is-connected{% endif %}"
                        aria-label="Row {{ row + 1 }}, column {{ col + 1 }}"
                        data-crossword-square="{{ index }}"
                        data-row="{{ row + 1 }}" data-col="{{ col + 1 }}"
                        style="grid-row: {{ row + 1 }}; grid-column: {{ col + 1 }};">
                   {% if starts %}
-                    <small data-crossword-start-number="{{ index }}">{{ starts|map(attribute='number')|join('/') }}</small>
+                    <small data-crossword-start-number="{{ index }}">{{ starts|map(attribute='display_number')|unique|join('/') }}</small>
                   {% endif %}
                   {% if not crossword_completed %}
                     <input class="crossword-cell" type="text" maxlength="1" autocomplete="off"
@@ -72,9 +72,13 @@
                 <ol>
                   {% for clue in crossword_entries if clue.direction == direction %}
                     <li data-crossword-entry data-direction="{{ clue.direction }}"
-                        data-row="{{ clue.row }}" data-col="{{ clue.col }}">
+                        data-row="{{ clue.row }}" data-col="{{ clue.col }}"
+                        data-length="{{ clue.length }}"
+                        {% if clue.partner %}data-partner="{{ clue.partner }}"{% endif %}
+                        data-key="{{ clue.key }}" data-role="{{ clue.role }}"
+                        {% if clue.hidden %}hidden{% endif %}>
                       <span class="crossword-clue-number">{{ clue.number }}.</span> {{ clue.hint }}
-                      <span class="crossword-answer-length">({{ clue.length }})</span>
+                      <span class="crossword-answer-length">({{ clue.lengths }})</span>
                     </li>
                   {% endfor %}
                 </ol>

@@ -216,11 +216,11 @@ function initializeAdminCrossword() {
     acrossContainer.replaceChildren();
     downContainer.replaceChildren();
     form.querySelectorAll("[data-admin-crossword-number]").forEach((number) => number.remove());
-    const startNumbers = new Map();
     entries.forEach((entry) => {
       const label = document.createElement("label");
       label.className = "crossword-clue-field";
       label.htmlFor = `clue-${entry.key}`;
+      label.dataset.entryKey = entry.key;
       label.textContent = `${entry.number}. (${entry.length}) `;
       const input = document.createElement("input");
       input.id = `clue-${entry.key}`;
@@ -232,10 +232,52 @@ function initializeAdminCrossword() {
       input.dataset.crosswordClue = entry.key;
       label.append(input);
       (entry.direction === "across" ? acrossContainer : downContainer).append(label);
+    });
+    gridInput.value = Array.from({ length: 15 }, (_, row) =>
+      grid.slice(row * 15, (row + 1) * 15),
+    ).join("\n");
+    applyConnections(entries);
+  };
 
+  // An answer referenced by a ~!conn tag has no hint field and no grid number.
+  const applyConnections = (entries) => {
+    const referenced = new Set();
+    form.querySelectorAll("[data-crossword-clue]").forEach((input) => {
+      for (const [, letter, number] of input.value.matchAll(/~!conn([AD])(\d+)/g)) {
+        referenced.add(`${letter}${Number(number)}`);
+      }
+    });
+    form.querySelectorAll("[data-admin-crossword-number]").forEach((number) => number.remove());
+    cells.forEach((cell) => cell.classList.remove("is-connected"));
+    const codeOf = (entry) => `${entry.direction === "across" ? "A" : "D"}${entry.number}`;
+    // A connected answer is numbered after the hint that carries its tag.
+    const ownerNumber = new Map();
+    entries.forEach((entry) => {
+      const input = form.querySelector(`[data-crossword-clue="${entry.key}"]`);
+      for (const [, letter, number] of (input?.value ?? "").matchAll(/~!conn([AD])(\d+)/g)) {
+        ownerNumber.set(`${letter}${Number(number)}`, entry.number);
+      }
+    });
+    const startNumbers = new Map();
+    entries.forEach((entry) => {
+      const code = codeOf(entry);
+      const hidden = referenced.has(code);
+      const input = form.querySelector(`[data-crossword-clue="${entry.key}"]`);
+      const owns = input && /~!conn[AD]\d+/.test(input.value);
+      if (hidden || owns) {
+        const step = entry.direction === "across" ? 1 : 15;
+        for (let n = 0; n < entry.length; n += 1) {
+          cells[entry.row * 15 + entry.col + n * step]?.classList.add("is-connected");
+        }
+      }
+      if (input) {
+        input.required = !hidden;
+        input.closest("label").hidden = hidden;
+      }
       const cellIndex = entry.row * 15 + entry.col;
       const numbers = startNumbers.get(cellIndex) ?? [];
-      numbers.push(String(entry.number));
+      const shown = String(hidden ? ownerNumber.get(code) : entry.number);
+      if (!numbers.includes(shown)) numbers.push(shown);
       startNumbers.set(cellIndex, numbers);
     });
     startNumbers.forEach((numbers, index) => {
@@ -247,9 +289,6 @@ function initializeAdminCrossword() {
       number.textContent = numbers.join("/");
       square.append(number);
     });
-    gridInput.value = Array.from({ length: 15 }, (_, row) =>
-      grid.slice(row * 15, (row + 1) * 15),
-    ).join("\n");
   };
 
   cells.forEach((cell) => {
@@ -259,10 +298,15 @@ function initializeAdminCrossword() {
       updateGrid();
     });
   });
+  form.addEventListener("input", (event) => {
+    if (event.target.matches?.("[data-crossword-clue]")) {
+      applyConnections(crosswordEntryList(currentGrid()));
+    }
+  });
   form.addEventListener("submit", () => {
     const hints = Object.fromEntries(
       Array.from(form.querySelectorAll("[data-crossword-clue]"))
-        .map((input) => [input.dataset.crosswordClue, input.value]),
+        .map((input) => [input.dataset.crosswordClue, input.closest("label").hidden ? "" : input.value]),
     );
     cluesInput.value = JSON.stringify(hints);
     const grid = currentGrid();
@@ -298,20 +342,9 @@ function initializeCrosswordSolver() {
         const number = index + 1;
         const numberElement = entry.querySelector(".crossword-clue-number");
         if (numberElement) numberElement.textContent = `${number}.`;
+        if (entry.hidden) return;
         const key = `${Number(entry.dataset.row) + 1},${Number(entry.dataset.col) + 1}`;
         starts.set(key, [...(starts.get(key) ?? []), `${direction} ${number}`]);
-        const squareIndex = (Number(entry.dataset.row) - 1) * 15
-          + Number(entry.dataset.col) - 1;
-        const square = document.querySelector(`[data-crossword-square="${squareIndex}"]`);
-        if (square) {
-          const numberLabel = square.querySelector("[data-crossword-start-number]");
-          if (numberLabel) {
-            const cellNumbers = [...(numberLabel.dataset.numbers ?? "").split("/").filter(Boolean)];
-            cellNumbers.push(String(number));
-            numberLabel.dataset.numbers = cellNumbers.join("/");
-            numberLabel.textContent = cellNumbers.join("/");
-          }
-        }
       });
       entries.forEach((entry) => entry.parentElement.append(entry));
     });
@@ -364,26 +397,61 @@ function initializeCrosswordSolver() {
   const inWord = (index, dir) => Boolean(neighbour(index, dir, 1) || neighbour(index, dir, -1));
   const otherDirection = () => (direction === "across" ? "down" : "across");
 
-  const wordIndexes = (index) => {
+  const wordIndexes = (index, dir = direction) => {
     let start = index;
-    for (let prev = neighbour(start, direction, -1); prev;
-      prev = neighbour(start, direction, -1)) {
+    for (let prev = neighbour(start, dir, -1); prev;
+      prev = neighbour(start, dir, -1)) {
       start = Number(prev.dataset.crosswordCell);
     }
     const indexes = [start];
-    for (let next = neighbour(start, direction, 1); next;
-      next = neighbour(indexes[indexes.length - 1], direction, 1)) {
+    for (let next = neighbour(start, dir, 1); next;
+      next = neighbour(indexes[indexes.length - 1], dir, 1)) {
       indexes.push(Number(next.dataset.crosswordCell));
     }
     return indexes;
+  };
+  const entryAt = (start, dir) => document.querySelector(
+    `[data-crossword-entry][data-direction="${dir}"]`
+    + `[data-row="${Math.floor(start / GRID_SIZE)}"][data-col="${start % GRID_SIZE}"]`);
+
+  // Next/previous cell in typing order. Past the end of a word that owns a
+  // connection, typing continues into the connected word (and back again).
+  const advance = (index, step) => {
+    const inside = neighbour(index, direction, step);
+    if (inside) return { cell: inside, dir: direction };
+    const entry = entryAt(wordIndexes(index)[0], direction);
+    const partner = entry?.dataset.partner
+      && document.querySelector(`[data-crossword-entry][data-key="${entry.dataset.partner}"]`);
+    if (!partner) return null;
+    const role = entry.dataset.role;
+    if (!((step === 1 && role === "owner") || (step === -1 && role === "target"))) return null;
+    const first = Number(partner.dataset.row) * GRID_SIZE + Number(partner.dataset.col);
+    const stride = partner.dataset.direction === "across" ? 1 : GRID_SIZE;
+    const partnerCells = Array.from({ length: Number(partner.dataset.length) },
+      (_, n) => first + n * stride);
+    // The words may share a square; skip it so the cursor always moves.
+    const ordered = step === 1 ? partnerCells : partnerCells.reverse();
+    const cell = ordered.map((i) => cellByIndex.get(i)).find((c) => c
+      && Number(c.dataset.crosswordCell) !== index);
+    return cell ? { cell, dir: partner.dataset.direction } : null;
   };
   const highlightWord = (index) => {
     document.querySelectorAll(".crossword-square.is-active-word")
       .forEach((square) => square.classList.remove("is-active-word"));
     if (index === null) return;
-    wordIndexes(index).forEach((i) => {
-      cellByIndex.get(i)?.closest(".crossword-square")?.classList.add("is-active-word");
-    });
+    const mark = (i) => cellByIndex.get(i)
+      ?.closest(".crossword-square")?.classList.add("is-active-word");
+    const indexes = wordIndexes(index);
+    indexes.forEach(mark);
+    // Highlight the connected partner word too.
+    const entry = entryAt(indexes[0], direction);
+    const partner = entry?.dataset.partner
+      && document.querySelector(`[data-crossword-entry][data-key="${entry.dataset.partner}"]`);
+    if (partner) {
+      const step = partner.dataset.direction === "across" ? 1 : GRID_SIZE;
+      const first = Number(partner.dataset.row) * GRID_SIZE + Number(partner.dataset.col);
+      for (let n = 0; n < Number(partner.dataset.length); n += 1) mark(first + n * step);
+    }
   };
 
   const setDirection = (dir, index) => {
@@ -425,10 +493,11 @@ function initializeCrosswordSolver() {
         event.preventDefault();
         setDirection(otherDirection(), index);
       } else if (event.key === "Backspace" && !cell.value) {
-        const previous = neighbour(index, direction, -1);
+        const previous = advance(index, -1);
         if (previous) {
           event.preventDefault();
-          previous.focus();
+          direction = previous.dir;
+          previous.cell.focus();
         }
       }
     });
@@ -444,8 +513,11 @@ function initializeCrosswordSolver() {
       localStorage.setItem(crosswordKey, JSON.stringify(answers));
 
       if (!cell.value) return;
-      const next = neighbour(index, direction, 1);
-      if (next) next.focus();
+      const next = advance(index, 1);
+      if (next) {
+        direction = next.dir;
+        next.cell.focus();
+      }
     });
   });
 
