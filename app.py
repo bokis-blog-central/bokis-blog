@@ -853,9 +853,6 @@ def home():
                              else "target" if entry["key"] in owner_of else "")
             entry["partner"] = (connections.get(entry["key"])
                                 or owner_of.get(entry["key"]))
-            owner = owner_of.get(entry["key"])
-            entry["display_number"] = (by_key[owner]["number"] if owner
-                                       else entry["number"])
             entry["lengths"] = str(entry["length"])
             if entry["key"] in connections:
                 entry["lengths"] += ", " + str(

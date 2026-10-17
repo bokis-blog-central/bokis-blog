@@ -249,18 +249,9 @@ function initializeAdminCrossword() {
     });
     form.querySelectorAll("[data-admin-crossword-number]").forEach((number) => number.remove());
     cells.forEach((cell) => cell.classList.remove("is-connected"));
-    const codeOf = (entry) => `${entry.direction === "across" ? "A" : "D"}${entry.number}`;
-    // A connected answer is numbered after the hint that carries its tag.
-    const ownerNumber = new Map();
-    entries.forEach((entry) => {
-      const input = form.querySelector(`[data-crossword-clue="${entry.key}"]`);
-      for (const [, letter, number] of (input?.value ?? "").matchAll(/~!conn([AD])(\d+)/g)) {
-        ownerNumber.set(`${letter}${Number(number)}`, entry.number);
-      }
-    });
     const startNumbers = new Map();
     entries.forEach((entry) => {
-      const code = codeOf(entry);
+      const code = `${entry.direction === "across" ? "A" : "D"}${entry.number}`;
       const hidden = referenced.has(code);
       const input = form.querySelector(`[data-crossword-clue="${entry.key}"]`);
       const owns = input && /~!conn[AD]\d+/.test(input.value);
@@ -274,10 +265,10 @@ function initializeAdminCrossword() {
         input.required = !hidden;
         input.closest("label").hidden = hidden;
       }
+      if (hidden) return;
       const cellIndex = entry.row * 15 + entry.col;
       const numbers = startNumbers.get(cellIndex) ?? [];
-      const shown = String(hidden ? ownerNumber.get(code) : entry.number);
-      if (!numbers.includes(shown)) numbers.push(shown);
+      numbers.push(String(entry.number));
       startNumbers.set(cellIndex, numbers);
     });
     startNumbers.forEach((numbers, index) => {

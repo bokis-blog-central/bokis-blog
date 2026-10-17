@@ -43,6 +43,7 @@
                 {% set starts = crossword_entries
                   |selectattr('row', 'equalto', row)
                   |selectattr('col', 'equalto', col)
+                  |rejectattr('hidden')
                   |list %}
                 <label class="crossword-square{% if crossword_completed %} is-revealed{% endif %}{% if index in crossword_connected_cells %} is-connected{% endif %}"
                        aria-label="Row {{ row + 1 }}, column {{ col + 1 }}"
@@ -50,7 +51,7 @@
                        data-row="{{ row + 1 }}" data-col="{{ col + 1 }}"
                        style="grid-row: {{ row + 1 }}; grid-column: {{ col + 1 }};">
                   {% if starts %}
-                    <small data-crossword-start-number="{{ index }}">{{ starts|map(attribute='display_number')|unique|join('/') }}</small>
+                    <small data-crossword-start-number="{{ index }}">{{ starts|map(attribute='number')|join('/') }}</small>
                   {% endif %}
                   {% if not crossword_completed %}
                     <input class="crossword-cell" type="text" maxlength="1" autocomplete="off"
