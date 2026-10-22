@@ -1,0 +1,36 @@
+{% macro crossword_fields(rows, clues) %}
+  <div class="admin-crossword-grid" role="group" aria-label="15 by 15 crossword solution editor" data-admin-crossword-grid>
+    {% for row in range(15) %}
+      {% for col in range(15) %}
+        {% set value = rows[row][col] if rows else '#' %}
+        <div class="admin-crossword-square" data-admin-crossword-square="{{ row * 15 + col }}">
+          <input class="admin-crossword-cell{% if value == '#' %} is-blocked{% endif %}"
+                 type="text" maxlength="1" value="{{ value }}"
+                 aria-label="Row {{ row + 1 }}, column {{ col + 1 }} (letter, blank open square, or # for blocked)"
+                 data-admin-crossword-cell>
+        </div>
+      {% endfor %}
+    {% endfor %}
+  </div>
+  <input type="hidden" name="grid" value="" data-crossword-solution>
+  <textarea name="clues" hidden data-crossword-clues>{{ clues|tojson if rows else '{}' }}</textarea>
+  <div class="crossword-clue-editor">
+    <section><h3>Across hints</h3><div data-admin-across-clues></div></section>
+    <section><h3>Down hints</h3><div data-admin-down-clues></div></section>
+  </div>
+{% endmacro %}
+
+{% macro post_picker(uid, post_id, label) %}
+  <div class="field-group">
+    <label for="post-search-{{ uid }}">Related post (search by title or author)</label>
+    <input id="post-search-{{ uid }}" type="search" autocomplete="off" maxlength="100"
+           placeholder="Type at least two characters" data-admin-search
+           data-search-url="{{ url_for('search_admin_posts') }}"
+           value="{{ label }}"
+           aria-controls="post-results-{{ uid }}" aria-describedby="post-search-help-{{ uid }}">
+    <input name="post_id" type="hidden" value="{{ post_id or '' }}" data-selected-id>
+    <p class="help" id="post-search-help-{{ uid }}">{% if post_id %}Selected: {{ label }}{% else %}No post selected.{% endif %}</p>
+    <ul class="search-results" id="post-results-{{ uid }}" data-search-results aria-live="polite"></ul>
+    <button class="button secondary" type="button" data-clear-selection>Clear post</button>
+  </div>
+{% endmacro %}

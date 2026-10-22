@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Bokword archive | {% endblock %}
+{% block content %}
+<div class="wrap page">
+  <p><a href="{{ url_for('bokword_archive') }}">&larr; Bokword archive</a></p>
+  <h1 class="page-title">Bokword cleared {{ entry.cleared_at|date }}</h1>
+
+  <ul class="meta">
+    {% if post %}<li>Related post: <a href="{{ url_for('post', post_id=post.id) }}">{{ post.title }}</a> by {{ post.username }}</li>{% endif %}
+    <li>
+      Original {{ 'victor' if victors|length == 1 else 'victors' }}:
+      {% if victors %}
+        {% for name in victors %}{% if name in existing_users %}<a href="{{ url_for('profile', username=name) }}">{{ name }}</a>{% else %}{{ name }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}
+      {% else %}none
+      {% endif %}
+    </li>
+  </ul>
+
+  <section class="bokword" aria-label="Practice Bokword">
+    <div class="bokword-board" data-crossword-board data-practice="true">
+      {% include "_crossword_board.html" %}
+      <form class="crossword-solve-form" method="post" action="{{ url_for('check_archive_bokword', entry_id=entry.id) }}" data-crossword-solve-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="guess" value="" data-crossword-guess>
+        <button class="button" type="submit">Check answers</button>
+        <p class="crossword-status" aria-live="polite" data-crossword-status></p>
+      </form>
+    </div>
+  </section>
+</div>
+{% endblock %}

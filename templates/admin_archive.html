@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% from "_admin_macros.html" import crossword_fields, post_picker %}
+{% block title %}Bokword archive admin | {% endblock %}
+{% block content %}
+<div class="wrap page narrow">
+  <p><a href="{{ url_for('admin' if g.user.is_admin else 'guest_panel') }}#crossword">&larr; {{ 'Admin' if g.user.is_admin else 'Guest' }}</a></p>
+  <h1 class="page-title">Bokword archive</h1>
+  <p class="help">Cleared Bokwords are added here automatically, newest first. Use the arrows to arrange the order shown to players by default.</p>
+
+  {% for e in entries %}
+    <section class="admin-block" id="entry-{{ e.id }}" aria-labelledby="entry-title-{{ e.id }}">
+      <h2 id="entry-title-{{ e.id }}">Cleared {{ e.cleared_at|date }}</h2>
+      <p><a href="{{ url_for('bokword_archive_entry', entry_id=e.id) }}">View entry</a></p>
+      <form method="post" action="{{ url_for('admin_archive_update', entry_id=e.id) }}" class="stack" data-admin-search-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="field-group">
+          <label for="date-{{ e.id }}">Date cleared</label>
+          <input id="date-{{ e.id }}" name="cleared_date" type="date" value="{{ e.cleared_at|iso }}" required>
+        </div>
+        {{ post_picker(e.id, e.post_id, (e.post_title ~ ' (by ' ~ e.post_author ~ ')') if e.post_id else '') }}
+        <div class="field-group">
+          <label for="victors-{{ e.id }}">Original victors (one username per line)</label>
+          <textarea id="victors-{{ e.id }}" name="victors" rows="4" maxlength="20000">{{ e.victors }}</textarea>
+        </div>
+        <div class="actions"><button class="button" type="submit">Save entry</button></div>
+      </form>
+      <div class="actions">
+        <form method="post" action="{{ url_for('admin_archive_move', entry_id=e.id) }}" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="direction" value="up">
+          <button class="button secondary" type="submit" {% if loop.first %}disabled{% endif %}>Move up</button>
+        </form>
+        <form method="post" action="{{ url_for('admin_archive_move', entry_id=e.id) }}" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="direction" value="down">
+          <button class="button secondary" type="submit" {% if loop.last %}disabled{% endif %}>Move down</button>
+        </form>
+        <form method="post" action="{{ url_for('admin_archive_delete', entry_id=e.id) }}" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="button danger" type="submit">Remove from archive</button>
+        </form>
+      </div>
+    </section>
+  {% else %}
+    <p class="empty">The archive is empty. Clearing the Bokword adds it here.</p>
+  {% endfor %}
+
+  <section class="admin-block" aria-labelledby="add-title">
+    <h2 id="add-title">Add a Bokword manually</h2>
+    <p class="help">New entries go to the top of the default order.</p>
+    <form method="post" action="{{ url_for('admin_archive_add') }}" class="stack" data-admin-crossword-form data-admin-search-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      {{ crossword_fields([], {}) }}
+      <div class="field-group">
+        <label for="date-new">Date cleared (defaults to today)</label>
+        <input id="date-new" name="cleared_date" type="date">
+      </div>
+      {{ post_picker('new', none, '') }}
+      <div class="field-group">
+        <label for="victors-new">Original victors (one username per line)</label>
+        <textarea id="victors-new" name="victors" rows="4" maxlength="20000"></textarea>
+      </div>
+      <div class="actions"><button class="button" type="submit">Add to archive</button></div>
+    </form>
+  </section>
+</div>
+{% endblock %}

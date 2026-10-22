@@ -2,6 +2,7 @@
 {% block title %}Account settings | {% endblock %}
 {% block content %}
 <div class="wrap page narrow">
+  <p><a href="{{ url_for('profile', username=g.user.username) }}">&larr; Back to profile</a></p>
   <h1 class="page-title">Account settings</h1>
 
   <section class="admin-block">

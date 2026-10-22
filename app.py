@@ -144,6 +144,22 @@ CREATE TABLE IF NOT EXISTS crossword_completions (
     PRIMARY KEY (user_id, puzzle_version)
 );
 
+CREATE TABLE IF NOT EXISTS crossword_progress (
+    user_id        INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    puzzle_version INTEGER NOT NULL,
+    answers        TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS bokword_archive (
+    id         INTEGER PRIMARY KEY,
+    solution   TEXT NOT NULL,
+    clues      TEXT NOT NULL,
+    victors    TEXT NOT NULL DEFAULT '[]',
+    post_id    INTEGER REFERENCES posts(id) ON DELETE SET NULL,
+    cleared_at TEXT NOT NULL DEFAULT (datetime('now')),
+    position   INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS boknections_state (
     id         INTEGER PRIMARY KEY CHECK (id = 1),
     puzzle     TEXT NOT NULL,
@@ -168,7 +184,7 @@ COWARD_PASSWORD = "IDELETECOMMENT"
 DELETED_COMMENT_TEXT = "I deleted my comment"
 
 
-def init_db():
+def migrate_db():
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA journal_mode = WAL")
     conn.executescript(SCHEMA)
@@ -240,7 +256,22 @@ def init_db():
     conn.close()
 
 
-init_db()
+migrate_db()
+
+
+_schema_checked = {}
+
+
+def ensure_schema(conn):
+    """Create any missing tables/columns once per database file version."""
+    try:
+        stamp = os.stat(DB_PATH).st_ino, os.stat(DB_PATH).st_size > 0
+    except OSError:
+        return
+    if _schema_checked.get("stamp") == stamp:
+        return
+    migrate_db()
+    _schema_checked["stamp"] = stamp
 
 
 def db():
@@ -248,6 +279,7 @@ def db():
         g.db = sqlite3.connect(DB_PATH)
         g.db.row_factory = sqlite3.Row
         g.db.execute("PRAGMA foreign_keys = ON")
+        ensure_schema(g.db)
     return g.db
 
 
@@ -566,6 +598,18 @@ def boknections_board(puzzle, progress):
     }
 
 
+def guest_usernames():
+    """Usernames of the current guest game authors; one query per request."""
+    if "guest_users" not in g:
+        rows = db().execute(
+            "SELECT u.username FROM settings s JOIN users u "
+            "ON CAST(u.id AS TEXT) = s.value "
+            "WHERE s.key IN ('guest_author_bokword', 'guest_author_boknections')"
+        ).fetchall()
+        g.guest_users = {row["username"] for row in rows}
+    return g.guest_users
+
+
 def flower_usernames():
     """Usernames that solved the current Boknections; one query per request."""
     if "flower_users" not in g:
@@ -675,12 +719,21 @@ def load_user_and_check_csrf():
             (user_id,)).fetchone()
         if g.user is None:
             session.clear()
+    g.can_bokword = g.can_boknections = False
+    if g.user:
+        g.can_bokword = bool(g.user["is_admin"]) or (
+            current_guest_author("bokword") == g.user["id"])
+        g.can_boknections = bool(g.user["is_admin"]) or (
+            current_guest_author("boknections") == g.user["id"])
     if "csrf" not in session:
         session["csrf"] = secrets.token_urlsafe(32)
     if request.method == "POST":
         sent = request.form.get("csrf_token", "")
         if not secrets.compare_digest(sent.encode(), session["csrf"].encode()):
             abort(400, "Your session expired. Go back, reload the page and try again.")
+    if g.user is None and request.endpoint not in GUEST_ENDPOINTS:
+        flash("Log in to continue.", "info")
+        return redirect(url_for("login", next=request.full_path.rstrip("?")))
 
 
 @app.after_request
@@ -695,6 +748,7 @@ def security_headers(resp):
 
 
 app.jinja_env.globals["csrf_token"] = lambda: session.get("csrf", "")
+app.jinja_env.globals["has_guest"] = lambda username: username in guest_usernames()
 app.jinja_env.globals["has_flower"] = lambda username: username in flower_usernames()
 
 
@@ -746,6 +800,10 @@ def paragraphs_filter(text):
     return Markup(html)
 
 
+GUEST_ENDPOINTS = {None, "static", "home", "login", "logout", "signup",
+                   "signup_unlock", "signup_create"}
+
+
 def safe_next(target):
     """Only allow redirects to paths on this site."""
     if target and target.startswith("/") and not target.startswith("//") \
@@ -772,6 +830,19 @@ def admin_required(view):
             abort(403, "Only the site admin can do that.")
         return view(*args, **kwargs)
     return wrapped
+
+
+def game_author_required(game):
+    """Allow admins and the guest author chosen for one game ('bokword' or 'boknections')."""
+    def decorator(view):
+        @wraps(view)
+        @login_required
+        def wrapped(*args, **kwargs):
+            if not getattr(g, f"can_{game}"):
+                abort(403, "Only the site admin or this game's guest author can do that.")
+            return view(*args, **kwargs)
+        return wrapped
+    return decorator
 
 
 _attempts = {}
@@ -801,8 +872,48 @@ def log_in(user_id):
 # Public pages
 # ----------------------------------------------------------------------
 
+def crossword_view(crossword):
+    """Return (entries ready for display, set of connected grid cells)."""
+    entries = crossword_entries(crossword["solution"]) or []
+    connections, _ = crossword_connections(entries, crossword["clues"])
+    connections = connections or {}
+    owner_of = {target: owner for owner, target in connections.items()}
+    by_key = {e["key"]: e for e in entries}
+    shown = {"across": 0, "down": 0}
+    for entry in entries:
+        hint = render_hint(crossword["clues"].get(entry["key"], ""))
+        entry["hint"] = hint
+        entry["hidden"] = entry["key"] in owner_of
+        entry["role"] = ("owner" if entry["key"] in connections
+                         else "target" if entry["key"] in owner_of else "")
+        entry["partner"] = (connections.get(entry["key"])
+                            or owner_of.get(entry["key"]))
+        # Snake-word targets are not hints of their own, so they use no number.
+        if not entry["hidden"]:
+            shown[entry["direction"]] += 1
+            entry["display_number"] = shown[entry["direction"]]
+        total = entry["length"]
+        if entry["key"] in connections:
+            total += by_key[connections[entry["key"]]]["length"]
+        entry["lengths"] = str(total)
+    connected_cells = set()
+    for entry in entries:
+        if entry["partner"]:
+            step = 1 if entry["direction"] == "across" else 15
+            start = entry["row"] * 15 + entry["col"]
+            connected_cells.update(start + step * i for i in range(entry["length"]))
+    return entries, connected_cells
+
+
+def current_guest_author(game):
+    value = get_setting(f"guest_author_{game}")
+    return int(value) if value and value.isdigit() else None
+
+
 @app.get("/")
 def home():
+    if g.user is None:
+        return render_template("welcome.html")
     top_week = db().execute(
         f"""SELECT * FROM (
                 SELECT {POST_COLS},
@@ -828,49 +939,31 @@ def home():
     crossword_entries_list = []
     crossword_completed = False
     crossword_answers = ""
+    crossword_saved = {}
     connected_cells = set()
     if crossword:
-        crossword_entries_list = crossword_entries(crossword["solution"]) or []
-        if g.user:
-            completion = db().execute(
-                "SELECT guess FROM crossword_completions "
+        completion = db().execute(
+            "SELECT guess FROM crossword_completions "
+            "WHERE user_id = ? AND puzzle_version = ?",
+            (g.user["id"], crossword["version"])).fetchone()
+        crossword_completed = completion is not None
+        if completion:
+            crossword_answers = completion["guess"] or crossword["solution"]
+        else:
+            progress = db().execute(
+                "SELECT answers FROM crossword_progress "
                 "WHERE user_id = ? AND puzzle_version = ?",
                 (g.user["id"], crossword["version"])).fetchone()
-            crossword_completed = completion is not None
-            if completion:
-                crossword_answers = completion["guess"] or crossword["solution"]
-    if crossword:
-        connections, _ = crossword_connections(
-            crossword_entries_list, crossword["clues"])
-        connections = connections or {}
-        owner_of = {target: owner for owner, target in connections.items()}
-        by_key = {e["key"]: e for e in crossword_entries_list}
-        for entry in crossword_entries_list:
-            hint = render_hint(crossword["clues"].get(entry["key"], ""))
-            entry["hint"] = hint
-            entry["hidden"] = entry["key"] in owner_of
-            entry["role"] = ("owner" if entry["key"] in connections
-                             else "target" if entry["key"] in owner_of else "")
-            entry["partner"] = (connections.get(entry["key"])
-                                or owner_of.get(entry["key"]))
-            entry["lengths"] = str(entry["length"])
-            if entry["key"] in connections:
-                entry["lengths"] += ", " + str(
-                    by_key[connections[entry["key"]]]["length"])
-        for entry in crossword_entries_list:
-            if entry["partner"]:
-                step = 1 if entry["direction"] == "across" else 15
-                start = entry["row"] * 15 + entry["col"]
-                connected_cells.update(
-                    start + step * i for i in range(entry["length"]))
+            if progress:
+                crossword_saved = json.loads(progress["answers"])
+        crossword_entries_list, connected_cells = crossword_view(crossword)
 
     boknections = None
     if boknections_enabled():
         boknections = {"prepared": False}
         puzzle = get_boknections()
         if puzzle:
-            progress = get_boknections_progress(
-                g.user["id"] if g.user else -1, puzzle["version"])
+            progress = get_boknections_progress(g.user["id"], puzzle["version"])
             boknections = boknections_board(puzzle, progress)
 
     return render_template("home.html", top_week=top_week, featured=featured,
@@ -880,7 +973,8 @@ def home():
                            crossword_entries=crossword_entries_list,
                            crossword_connected_cells=connected_cells,
                            crossword_completed=crossword_completed,
-                           crossword_answers=crossword_answers)
+                           crossword_answers=crossword_answers,
+                           crossword_saved=crossword_saved)
 
 
 @app.get("/explore")
@@ -1534,9 +1628,36 @@ def signup_create():
 # Admin
 # ----------------------------------------------------------------------
 
+def crossword_admin_context():
+    crossword = get_crossword()
+    rows, clues = [], {}
+    if crossword:
+        rows = [crossword["solution"][r * 15:(r + 1) * 15] for r in range(15)]
+        clues = crossword["clues"]
+    return {"boknections_on": boknections_enabled(),
+            "boknections_puzzle": get_boknections(),
+            "crossword": crossword, "crossword_rows": rows,
+            "crossword_clues": clues}
+
+
+@app.get("/guest")
+@login_required
+def guest_panel():
+    if g.user["is_admin"] or not (g.can_bokword or g.can_boknections):
+        abort(403, "This page is for guest game authors.")
+    return render_template("guest.html", **crossword_admin_context())
+
+
+def games_redirect(anchor):
+    """Send admins to the admin panel and guest authors to their own page."""
+    target = "admin" if g.user["is_admin"] else "guest_panel"
+    return redirect(url_for(target) + anchor)
+
+
 @app.get("/admin")
 @admin_required
 def admin():
+    is_admin = True
     featured_id = get_setting("featured_post_id")
     featured_post = None
     if featured_id and featured_id.isdigit():
@@ -1556,39 +1677,73 @@ def admin():
         "posts": db().execute("SELECT COUNT(*) FROM posts").fetchone()[0],
         "likes": db().execute("SELECT COUNT(*) FROM likes").fetchone()[0],
     }
-    crossword = get_crossword()
-    crossword_rows = []
-    crossword_clues = {}
-    if crossword:
-        crossword_rows = [
-            crossword["solution"][row * 15:(row + 1) * 15]
-            for row in range(15)
-        ]
-        crossword_clues = crossword["clues"]
+    guest_authors = {}
+    for game in ("bokword", "boknections"):
+        author_id = current_guest_author(game)
+        row = author_id and db().execute(
+            "SELECT id, username FROM users WHERE id = ?", (author_id,)).fetchone()
+        guest_authors[game] = dict(row) if row else None
+    bokword_guest = guest_authors["bokword"]["username"] if guest_authors["bokword"] else ""
     return render_template("admin.html", stats=stats, featured_post=featured_post,
-                           boknections_on=boknections_enabled(),
-                           boknections_puzzle=get_boknections(),
-                           crossword=crossword, crossword_rows=crossword_rows,
-                           crossword_clues=crossword_clues)
+                           is_admin=is_admin, guest_authors=guest_authors,
+                           bokword_guest=bokword_guest,
+                           **crossword_admin_context())
+
+
+@app.get("/admin/search/users")
+@admin_required
+def search_admin_users():
+    query = request.args.get("q", "").strip()[:100]
+    pattern = like_pattern(query)
+    rows = db().execute(
+        "SELECT id, username FROM users WHERE username LIKE ? ESCAPE '\\' "
+        "AND username <> ? COLLATE NOCASE ORDER BY username LIMIT 12",
+        (pattern, COWARD_USERNAME)).fetchall()
+    return jsonify(results=[{"id": r["id"], "label": r["username"]} for r in rows])
+
+
+@app.post("/admin/guest-author")
+@admin_required
+def admin_guest_author():
+    game = request.form.get("game", "")
+    if game not in ("bokword", "boknections"):
+        abort(400)
+    user_id = request.form.get("user_id", "").strip()
+    key = f"guest_author_{game}"
+    label = "Bokword" if game == "bokword" else "Boknections"
+    if not user_id:
+        db().execute("DELETE FROM settings WHERE key = ?", (key,))
+        db().commit()
+        flash(f"The {label} guest author was removed.", "ok")
+    else:
+        user = db().execute(
+            "SELECT id, username FROM users WHERE id = ? AND username <> ? COLLATE NOCASE",
+            (user_id, COWARD_USERNAME)).fetchone() if user_id.isdigit() else None
+        if user is None:
+            flash("Choose a user from the list.", "error")
+        else:
+            set_setting(key, str(user["id"]))
+            flash(f"{user['username']} is now the {label} guest author.", "ok")
+    return redirect(url_for("admin") + "#guest-authors")
 
 
 @app.post("/admin/boknections/toggle")
-@admin_required
+@game_author_required("boknections")
 def admin_toggle_boknections():
     enabled = request.form.get("enabled") == "1"
     set_setting("boknections_enabled", "1" if enabled else "0")
     flash("Boknections, Wild Card is now "
           + ("shown on the home page." if enabled else "hidden."), "ok")
-    return redirect(url_for("admin") + "#boknections")
+    return games_redirect("#boknections")
 
 
 @app.post("/admin/boknections")
-@admin_required
+@game_author_required("boknections")
 def admin_save_boknections():
     puzzle, error = validate_boknections_form(request.form)
     if error:
         flash(error, "error")
-        return redirect(url_for("admin") + "#boknections")
+        return games_redirect("#boknections")
     serialized = json.dumps(puzzle, ensure_ascii=False, sort_keys=True)
     state = db().execute(
         "SELECT puzzle FROM boknections_state WHERE id = 1").fetchone()
@@ -1606,21 +1761,21 @@ def admin_save_boknections():
     else:
         flash("No Boknections changes to save.", "info")
     db().commit()
-    return redirect(url_for("admin") + "#boknections")
+    return games_redirect("#boknections")
 
 
 @app.post("/admin/crossword")
-@admin_required
+@game_author_required("bokword")
 def admin_save_crossword():
     raw_grid = request.form.get("grid", "")
     raw_clues = request.form.get("clues", "")
     if len(raw_grid) > 1000 or len(raw_clues) > 60000:
         flash("The crossword grid or clues are too large.", "error")
-        return redirect(url_for("admin") + "#crossword")
+        return games_redirect("#crossword")
     solution, clues, error = validate_crossword(raw_grid, raw_clues)
     if error:
         flash(error, "error")
-        return redirect(url_for("admin") + "#crossword")
+        return games_redirect("#crossword")
 
     serialized_clues = json.dumps(clues, ensure_ascii=False, sort_keys=True)
     state = db().execute(
@@ -1637,15 +1792,16 @@ def admin_save_crossword():
             "updated_at = datetime('now') WHERE id = 1",
             (solution, serialized_clues))
         db().execute("DELETE FROM crossword_completions")
+        db().execute("DELETE FROM crossword_progress")
         flash("Weekly Bokword puzzle updated; previous stars were reset.", "ok")
     else:
         flash("No crossword changes to save.", "info")
     db().commit()
-    return redirect(url_for("admin") + "#crossword")
+    return games_redirect("#crossword")
 
 
 @app.post("/admin/crossword/reset")
-@admin_required
+@game_author_required("bokword")
 def admin_reset_crossword():
     state = db().execute(
         "SELECT version FROM crossword_state WHERE id = 1"
@@ -1659,11 +1815,65 @@ def admin_reset_crossword():
             "UPDATE crossword_state SET solution = ?, clues = '{}', version = version + 1, "
             "updated_at = datetime('now') WHERE id = 1", ("#" * 225,))
     db().execute("DELETE FROM crossword_completions")
+    db().execute("DELETE FROM crossword_progress")
     db().commit()
     flash(
-        "The crossword was reset to an empty grid and unpublished; "
-        "all solver stars were cleared.", "ok")
+        "The Bokword was cleared; all solver stars and saved answers were removed.",
+        "ok")
+    return games_redirect("#crossword")
+
+
+@app.post("/admin/crossword/archive")
+@admin_required
+def admin_archive_current_crossword():
+    crossword = get_crossword()
+    if crossword is None:
+        flash("There is no published Bokword to archive.", "error")
+        return redirect(url_for("admin") + "#crossword")
+    serialized = json.dumps(crossword["clues"], ensure_ascii=False, sort_keys=True)
+    if db().execute(
+            "SELECT 1 FROM bokword_archive WHERE solution = ? AND clues = ?",
+            (crossword["solution"], serialized)).fetchone():
+        flash("This Bokword is already in the archive.", "info")
+        return redirect(url_for("admin") + "#crossword")
+    victors = [row["username"] for row in db().execute(
+        "SELECT u.username FROM crossword_completions c "
+        "JOIN users u ON u.id = c.user_id WHERE c.puzzle_version = ? "
+        "ORDER BY c.completed_at, u.username", (crossword["version"],))]
+    add_archive_entry(crossword["solution"], crossword["clues"], victors)
+    db().commit()
+    flash("The current Bokword was added to the archive with its solvers as "
+          "original victors.", "ok")
     return redirect(url_for("admin") + "#crossword")
+
+
+@app.post("/crossword/progress")
+@login_required
+def save_crossword_progress():
+    crossword = get_crossword()
+    if crossword is None:
+        abort(404)
+    try:
+        raw = json.loads(request.form.get("answers", "{}"))
+    except ValueError:
+        abort(400)
+    if not isinstance(raw, dict):
+        abort(400)
+    answers = {}
+    for key, value in raw.items():
+        if not (key.isdigit() and 0 <= int(key) < 225 and isinstance(value, str)):
+            continue
+        value = normalize_crossword_text(value)
+        if len(value) == 1 and crossword["solution"][int(key)] != "#":
+            answers[key] = value
+    db().execute(
+        "INSERT INTO crossword_progress (user_id, puzzle_version, answers) "
+        "VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET "
+        "puzzle_version = excluded.puzzle_version, answers = excluded.answers",
+        (g.user["id"], crossword["version"],
+         json.dumps(answers, ensure_ascii=False)))
+    db().commit()
+    return jsonify(saved=True)
 
 
 @app.post("/crossword/solve")
@@ -1684,6 +1894,8 @@ def solve_crossword():
             db().execute(
                 "UPDATE users SET bokword_victories = bokword_victories + 1 "
                 "WHERE id = ?", (g.user["id"],))
+        db().execute("DELETE FROM crossword_progress WHERE user_id = ?",
+                     (g.user["id"],))
         db().commit()
     if request.accept_mimetypes.best == "application/json":
         return jsonify(solved=solved)
@@ -1764,8 +1976,10 @@ def check_boknections():
 
 
 @app.get("/admin/search/posts")
-@admin_required
+@login_required
 def search_admin_posts():
+    if not g.can_bokword:
+        abort(403, "Only the site admin or the Bokword guest author can do that.")
     query = request.args.get("q", "").strip()[:100]
     if len(query) < 2:
         return jsonify(results=[])
@@ -1812,6 +2026,228 @@ def admin_signup_password():
         set_setting("signup_password_hash", generate_password_hash(new))
         flash("Signup password changed.", "ok")
     return redirect(url_for("admin"))
+
+
+# ----------------------------------------------------------------------
+# Bokword archive
+# ----------------------------------------------------------------------
+
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def valid_date(value):
+    if not DATE_RE.match(value or ""):
+        return None
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        return None
+    return value
+
+
+def add_archive_entry(solution, clues, victors, post_id=None, cleared_at=None):
+    top = db().execute("SELECT MIN(position) FROM bokword_archive").fetchone()[0]
+    position = 0 if top is None else top - 1
+    cursor = db().execute(
+        "INSERT INTO bokword_archive "
+        "(solution, clues, victors, post_id, cleared_at, position) "
+        "VALUES (?, ?, ?, ?, COALESCE(?, datetime('now')), ?)",
+        (solution, json.dumps(clues, ensure_ascii=False, sort_keys=True),
+         json.dumps(victors, ensure_ascii=False), post_id, cleared_at, position))
+    return cursor.lastrowid
+
+
+def parse_victors(text):
+    names = []
+    for name in re.split(r"[\r\n,]+", text or ""):
+        name = " ".join(name.split())
+        if name and name not in names:
+            names.append(name[:60])
+    return names[:500]
+
+
+def parse_post_id(text):
+    """Return (post id or None, error message or None)."""
+    text = (text or "").strip()
+    if not text:
+        return None, None
+    if text.isdigit() and db().execute(
+            "SELECT 1 FROM posts WHERE id = ?", (text,)).fetchone():
+        return int(text), None
+    return None, "That post does not exist."
+
+
+def archive_rows(order):
+    return db().execute(
+        "SELECT a.id, a.victors, a.cleared_at, a.post_id, a.position, "
+        "p.title AS post_title, u.username AS post_author "
+        "FROM bokword_archive a LEFT JOIN posts p ON p.id = a.post_id "
+        "LEFT JOIN users u ON u.id = p.user_id "
+        f"ORDER BY {order}").fetchall()
+
+
+def get_archive_entry(entry_id):
+    row = db().execute(
+        "SELECT id, solution, clues, victors, post_id, cleared_at "
+        "FROM bokword_archive WHERE id = ?", (entry_id,)).fetchone()
+    if row is None:
+        abort(404)
+    return row
+
+
+@app.get("/bokword-archive")
+def bokword_archive():
+    sort = request.args.get("sort", "new")
+    if sort not in ("new", "old", "custom"):
+        sort = "new"
+    date_from = valid_date(request.args.get("from", "")) if sort == "custom" else None
+    date_to = valid_date(request.args.get("to", "")) if sort == "custom" else None
+    orders = {
+        "new": "a.cleared_at DESC, a.id DESC",
+        "old": "a.cleared_at, a.id",
+        "custom": "a.cleared_at DESC, a.id DESC",
+    }
+    clauses, params = [], []
+    if date_from:
+        clauses.append("date(a.cleared_at) >= ?")
+        params.append(date_from)
+    if date_to:
+        clauses.append("date(a.cleared_at) <= ?")
+        params.append(date_to)
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    rows = db().execute(
+        "SELECT a.id, a.victors, a.cleared_at, a.post_id, p.title AS post_title "
+        "FROM bokword_archive a LEFT JOIN posts p ON p.id = a.post_id "
+        f"{where} ORDER BY {orders[sort]}", params).fetchall()
+    entries = [{"id": r["id"], "cleared_at": r["cleared_at"],
+                "victor_count": len(json.loads(r["victors"])),
+                "post_id": r["post_id"], "post_title": r["post_title"]}
+               for r in rows]
+    return render_template("archive.html", entries=entries, sort=sort,
+                           date_from=date_from or "", date_to=date_to or "")
+
+
+@app.get("/bokword-archive/<int:entry_id>")
+def bokword_archive_entry(entry_id):
+    row = get_archive_entry(entry_id)
+    crossword = {"solution": row["solution"], "clues": json.loads(row["clues"])}
+    entries, connected_cells = crossword_view(crossword)
+    post = None
+    if row["post_id"]:
+        post = db().execute(
+            "SELECT p.id, p.title, u.username FROM posts p "
+            "JOIN users u ON u.id = p.user_id WHERE p.id = ?",
+            (row["post_id"],)).fetchone()
+    victors = json.loads(row["victors"])
+    existing = set()
+    if victors:
+        marks = ",".join("?" for _ in victors)
+        existing = {r["username"] for r in db().execute(
+            f"SELECT username FROM users WHERE username IN ({marks})", victors)}
+    return render_template("archive_entry.html", entry=row, post=post,
+                           crossword=crossword, crossword_entries=entries,
+                           crossword_connected_cells=connected_cells,
+                           crossword_completed=False, crossword_answers="",
+                           crossword_saved={}, victors=victors,
+                           existing_users=existing)
+
+
+@app.post("/bokword-archive/<int:entry_id>/check")
+def check_archive_bokword(entry_id):
+    row = get_archive_entry(entry_id)
+    guess = normalize_crossword_text(request.form.get("guess", ""))
+    solved = len(guess) == 225 and (
+        crossword_match_key(guess) == crossword_match_key(row["solution"]))
+    return jsonify(solved=solved)
+
+
+@app.get("/admin/archive")
+@admin_required
+def admin_archive():
+    rows = archive_rows("a.position, a.id")
+    entries = [{"id": r["id"], "cleared_at": r["cleared_at"],
+                "victors": "\n".join(json.loads(r["victors"])),
+                "post_id": r["post_id"], "post_title": r["post_title"],
+                "post_author": r["post_author"]} for r in rows]
+    return render_template("admin_archive.html", entries=entries)
+
+
+@app.post("/admin/archive/add")
+@admin_required
+def admin_archive_add():
+    raw_grid = request.form.get("grid", "")
+    raw_clues = request.form.get("clues", "")
+    if len(raw_grid) > 1000 or len(raw_clues) > 60000:
+        flash("The crossword grid or clues are too large.", "error")
+        return redirect(url_for("admin_archive"))
+    solution, clues, error = validate_crossword(raw_grid, raw_clues)
+    post_id, post_error = parse_post_id(request.form.get("post_id"))
+    cleared = valid_date(request.form.get("cleared_date", ""))
+    error = error or post_error
+    if not error and request.form.get("cleared_date") and not cleared:
+        error = "Enter a valid cleared date."
+    if error:
+        flash(error, "error")
+        return redirect(url_for("admin_archive"))
+    add_archive_entry(solution, clues, parse_victors(request.form.get("victors")),
+                      post_id, f"{cleared} 12:00:00" if cleared else None)
+    db().commit()
+    flash("Bokword added to the archive.", "ok")
+    return redirect(url_for("admin_archive"))
+
+
+@app.post("/admin/archive/<int:entry_id>/update")
+@admin_required
+def admin_archive_update(entry_id):
+    row = get_archive_entry(entry_id)
+    post_id, error = parse_post_id(request.form.get("post_id"))
+    cleared = valid_date(request.form.get("cleared_date", ""))
+    if not error and not cleared:
+        error = "Enter a valid cleared date."
+    if error:
+        flash(error, "error")
+        return redirect(url_for("admin_archive"))
+    cleared_at = row["cleared_at"]
+    if cleared != cleared_at[:10]:
+        cleared_at = f"{cleared} 12:00:00"
+    db().execute(
+        "UPDATE bokword_archive SET post_id = ?, victors = ?, cleared_at = ? "
+        "WHERE id = ?",
+        (post_id, json.dumps(parse_victors(request.form.get("victors")),
+                             ensure_ascii=False), cleared_at, entry_id))
+    db().commit()
+    flash("Archive entry saved.", "ok")
+    return redirect(url_for("admin_archive") + f"#entry-{entry_id}")
+
+
+@app.post("/admin/archive/<int:entry_id>/delete")
+@admin_required
+def admin_archive_delete(entry_id):
+    get_archive_entry(entry_id)
+    db().execute("DELETE FROM bokword_archive WHERE id = ?", (entry_id,))
+    db().commit()
+    flash("Archive entry removed.", "ok")
+    return redirect(url_for("admin_archive"))
+
+
+@app.post("/admin/archive/<int:entry_id>/move")
+@admin_required
+def admin_archive_move(entry_id):
+    get_archive_entry(entry_id)
+    direction = request.form.get("direction")
+    if direction not in ("up", "down"):
+        abort(400)
+    ids = [r["id"] for r in db().execute(
+        "SELECT id FROM bokword_archive ORDER BY position, id")]
+    index = ids.index(entry_id)
+    swap = index - 1 if direction == "up" else index + 1
+    if 0 <= swap < len(ids):
+        ids[index], ids[swap] = ids[swap], ids[index]
+    for position, archive_id in enumerate(ids):
+        db().execute("UPDATE bokword_archive SET position = ? WHERE id = ?",
+                     (position, archive_id))
+    db().commit()
+    return redirect(url_for("admin_archive") + f"#entry-{entry_id}")
 
 
 # ----------------------------------------------------------------------

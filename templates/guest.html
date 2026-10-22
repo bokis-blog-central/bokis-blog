@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% from "_admin_macros.html" import crossword_fields %}
+{% block title %}Guest | {% endblock %}
+{% block content %}
+<div class="wrap page narrow">
+  <h1 class="page-title">Guest</h1>
+  <p class="muted">You are a guest author. You can manage the game{{ 's' if g.can_bokword and g.can_boknections else '' }} you were given below.</p>
+
+  {% if g.can_bokword %}{% include "_game_bokword.html" %}{% endif %}
+  {% if g.can_boknections %}{% include "_game_boknections.html" %}{% endif %}
+</div>
+{% endblock %}

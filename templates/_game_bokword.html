@@ -1,0 +1,27 @@
+{% from "_admin_macros.html" import crossword_fields %}
+  <section class="admin-block" id="crossword" aria-labelledby="crossword-title">
+    <h2 id="crossword-title">Current Weekly Bokword{% if bokword_guest %} (guest author: {{ bokword_guest }}){% endif %}</h2>
+    <p class="help">Enter Latin or Greek letters in answer cells and use # for blocked cells. To remove a block, focus its square and press Backspace or Delete. The empty square stays open so you can enter its answer letter. Clue starts and answer ends are determined by the grid. Changing the published puzzle clears its previous solver stars.</p>
+    <form method="post" action="{{ url_for('admin_save_crossword') }}" class="stack" data-admin-crossword-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      {{ crossword_fields(crossword_rows, crossword_clues) }}
+      <div class="actions">
+        <button class="button" type="submit">{{ 'Save crossword' if crossword else 'Publish crossword' }}</button>
+      </div>
+    </form>
+    {% if crossword %}
+      <div class="actions">
+        {% if g.user.is_admin %}
+          <form method="post" action="{{ url_for('admin_archive_current_crossword') }}" class="crossword-archive-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="button secondary" type="submit">Add current Bokword to archive</button>
+          </form>
+        {% endif %}
+        <form method="post" action="{{ url_for('admin_reset_crossword') }}" class="crossword-reset-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="button danger" type="submit">Clear Bokword</button>
+        </form>
+      </div>
+      <p class="help">{% if g.user.is_admin %}Adding saves the current puzzle and its solvers (as original victors) to the archive. {% endif %}Clearing saves an empty grid of blocked cells, unpublishes the puzzle, and clears all solver stars and every user's saved answers. It does not add the puzzle to the archive.</p>
+    {% endif %}
+    {% if g.user.is_admin %}<p><a href="{{ url_for('admin_archive') }}">Manage the Bokword archive</a></p>{% endif %}  </section>

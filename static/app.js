@@ -179,8 +179,10 @@ function crosswordEntryList(grid) {
 }
 
 function initializeAdminCrossword() {
-  const form = document.querySelector("[data-admin-crossword-form]");
-  if (!form) return;
+  document.querySelectorAll("[data-admin-crossword-form]").forEach(initializeAdminCrosswordForm);
+}
+
+function initializeAdminCrosswordForm(form) {
   const cells = Array.from(form.querySelectorAll("[data-admin-crossword-cell]"));
   const gridInput = form.querySelector("[data-crossword-solution]");
   const cluesInput = form.querySelector("[data-crossword-clues]");
@@ -329,11 +331,12 @@ function initializeCrosswordSolver() {
     };
     const starts = new Map();
     Object.entries(orderedEntries).forEach(([direction, entries]) => {
-      entries.forEach((entry, index) => {
-        const number = index + 1;
+      let number = 0;
+      entries.forEach((entry) => {
+        if (entry.hidden) return;
+        number += 1;
         const numberElement = entry.querySelector(".crossword-clue-number");
         if (numberElement) numberElement.textContent = `${number}.`;
-        if (entry.hidden) return;
         const key = `${Number(entry.dataset.row) + 1},${Number(entry.dataset.col) + 1}`;
         starts.set(key, [...(starts.get(key) ?? []), `${direction} ${number}`]);
       });
@@ -351,23 +354,52 @@ function initializeCrosswordSolver() {
   }
 
   const cells = Array.from(document.querySelectorAll("[data-crossword-cell]"));
-  const crosswordKey = "boki-crossword-answers";
+  const board = document.querySelector("[data-crossword-board]");
+  const progressUrl = board?.dataset.progressUrl;
+  localStorage.removeItem("boki-crossword-answers");
 
-  // Restore crossword answers from localStorage
-  const savedAnswers = localStorage.getItem(crosswordKey);
-  if (savedAnswers) {
+  // Answers are stored on the user's account, so they follow them across devices.
+  if (progressUrl && board.dataset.savedAnswers) {
     try {
-      const answers = JSON.parse(savedAnswers);
+      const answers = JSON.parse(board.dataset.savedAnswers);
       cells.forEach((cell) => {
-        const index = Number(cell.dataset.crosswordCell);
-        if (answers[index]) {
-          cell.value = answers[index];
-        }
+        const answer = answers[Number(cell.dataset.crosswordCell)];
+        if (answer) cell.value = answer;
       });
     } catch {
-      // Ignore if localStorage data is corrupted
+      // Ignore malformed saved answers
     }
   }
+
+  let saveTimer = null;
+  const saveProgress = () => {
+    if (!progressUrl) return;
+    const answers = {};
+    cells.forEach((c) => {
+      if (c.value) answers[Number(c.dataset.crosswordCell)] = c.value;
+    });
+    fetch(progressUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      credentials: "same-origin",
+      keepalive: true,
+      body: new URLSearchParams({
+        csrf_token: board.dataset.csrf,
+        answers: JSON.stringify(answers),
+      }),
+    }).catch(() => {});
+  };
+  const scheduleSave = () => {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveProgress, 600);
+  };
+  window.addEventListener("pagehide", () => {
+    if (saveTimer !== null) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+      saveProgress();
+    }
+  });
 
   // Typing direction: stays on "across" or "down" until the solver changes it
   // (click the active cell again, press Space, or click a clue).
@@ -495,13 +527,7 @@ function initializeCrosswordSolver() {
 
     cell.addEventListener("input", () => {
       cell.value = normalizeCrosswordCell(cell.value);
-      // Save to localStorage on each input
-      const answers = {};
-      cells.forEach((c) => {
-        const i = Number(c.dataset.crosswordCell);
-        if (c.value) answers[i] = c.value;
-      });
-      localStorage.setItem(crosswordKey, JSON.stringify(answers));
+      scheduleSave();
 
       if (!cell.value) return;
       const next = advance(index, 1);
@@ -555,8 +581,13 @@ function initializeCrosswordSolver() {
       if (!response.ok) throw new Error(`Could not check the puzzle (${response.status}).`);
       const result = await response.json();
       if (result.solved) {
+        if (board?.dataset.practice) {
+          status.textContent = "Solved! Nice work.";
+          return;
+        }
         status.textContent = "Puzzle solved! Your star is being added.";
-        localStorage.removeItem(crosswordKey);
+        clearTimeout(saveTimer);
+        saveTimer = null;
         window.location.reload();
         return;
       }
@@ -932,6 +963,17 @@ function initializeLikeButtons() {
 
 initializeColorControls();
 initializeAvatarCrop();
+function initializeArchiveFilter() {
+  const form = document.querySelector("[data-archive-filter]");
+  const sort = form?.querySelector("[data-archive-sort]");
+  const dates = form?.querySelector("[data-archive-dates]");
+  if (!sort || !dates) return;
+  sort.addEventListener("change", () => {
+    dates.hidden = sort.value !== "custom";
+  });
+}
+
+initializeArchiveFilter();
 initializeAdminCrossword();
 initializeCrosswordSolver();
 initializeBoknections();

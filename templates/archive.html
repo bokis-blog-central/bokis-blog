@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Bokword archive | {% endblock %}
+{% block content %}
+<div class="wrap page narrow">
+  <h1 class="page-title">Bokword archive</h1>
+  <p class="muted">Every Weekly Bokword that has been cleared. Pick one to practice; no stars are awarded here.</p>
+
+  <form class="archive-filter" method="get" action="{{ url_for('bokword_archive') }}" data-archive-filter>
+    <div class="archive-filter-row">
+      <label for="sort">Sort by</label>
+      <select id="sort" name="sort" data-archive-sort>
+        <option value="new" {% if sort == 'new' %}selected{% endif %}>Newest first</option>
+        <option value="old" {% if sort == 'old' %}selected{% endif %}>Oldest first</option>
+        <option value="custom" {% if sort == 'custom' %}selected{% endif %}>Custom order</option>
+      </select>
+    </div>
+    <div class="archive-filter-row" data-archive-dates {% if sort != 'custom' %}hidden{% endif %}>
+      <label for="from">Cleared from</label>
+      <input id="from" name="from" type="date" value="{{ date_from }}">
+      <label for="to">to</label>
+      <input id="to" name="to" type="date" value="{{ date_to }}">
+    </div>
+    <div class="archive-filter-row">
+      <button class="button" type="submit">Apply</button>
+    </div>
+  </form>
+  {% if sort == 'custom' %}<p class="help">Showing Bokwords cleared within the chosen dates, newest first. Set both dates to the same day to find a specific date.</p>{% endif %}
+  {% if entries %}
+    <ol class="post-list">
+      {% for e in entries %}
+        <li class="post-item">
+          <time datetime="{{ e.cleared_at|iso }}">{{ e.cleared_at|date }}</time>
+          <div>
+            <h3><a href="{{ url_for('bokword_archive_entry', entry_id=e.id) }}">Bokword cleared {{ e.cleared_at|date }}</a></h3>
+            <ul class="meta">
+              <li>{{ e.victor_count }} {{ 'victor' if e.victor_count == 1 else 'victors' }}</li>
+              {% if e.post_id %}<li>Related post: <a href="{{ url_for('post', post_id=e.post_id) }}">{{ e.post_title }}</a></li>{% endif %}
+            </ul>
+          </div>
+        </li>
+      {% endfor %}
+    </ol>
+  {% else %}
+    <p class="empty">No archived Bokwords match.</p>
+  {% endif %}
+</div>
+{% endblock %}

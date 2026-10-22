@@ -73,14 +73,14 @@ Do not use it on a real site.
 | `SIGNUP_PASSWORD` | Initial signup password. Only read the first time the database is created. Change it later on the Admin page. |
 | `SECRET_KEY` | Required, stable cookie-signing key of at least 32 bytes. Set locally in `.env` and in Render's environment settings. |
 | `SITE_NAME` | Name shown in the header. Default: Boki.blog. |
-| `BLOG_DATA_DIR` | Directory for the database and uploads. Default: `instance/`; set to `/opt/render/project/src/instance` when deploying with the included Render disk. |
+| `BLOG_DATA_DIR` | Directory for the database and uploads. Default: `instance/`; set to `/var/data` when deploying with the included Render disk. |
 | `BLOG_DB` | Optional explicit path to the SQLite file. Default: `<BLOG_DATA_DIR>/blog.db`. |
 | `BLOG_HTTPS` | Set to `1` when serving over HTTPS so cookies are marked secure. |
 
 ## Putting it online
 
 The included `render.yaml` configures a paid Render web service, Gunicorn, HTTPS
-cookies, and a persistent disk at `/opt/render/project/src/instance` for the SQLite database and uploaded
+cookies, and a persistent disk at `/var/data` for the SQLite database and uploaded
 images. Connect the repository to Render as a Blueprint. When prompted, enter the
 `SECRET_KEY` and `SIGNUP_PASSWORD` values from your local `.env`; Render stores
 these as service environment variables. Do not commit `.env`.
@@ -89,7 +89,7 @@ After the first deploy, open the service Shell and run
 `flask --app app create-admin yourname` to create the admin account. The service
 starts with a new database on its persistent disk. If you need to bring over
 existing local posts or images, copy the local database and `instance/uploads/`
-into the mounted instance directory before creating the admin account.
+into the mounted `/var/data` directory before creating the admin account.
 
 The log-in and signup-password throttling is kept in memory and per process, which is
 fine for a small site on one process.

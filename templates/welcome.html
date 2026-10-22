@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="featured" aria-labelledby="welcome-title">
+  <div class="wrap">
+    <h1 id="welcome-title">Welcome to {{ site_name }}</h1>
+    <p class="lede">
+      {{ site_name }} is a small community blog where people write posts, comment and like each other&rsquo;s work,
+      and solve a weekly Bokword crossword and a monthly Boknections puzzle for stars and flowers by their names.
+    </p>
+    <div class="actions">
+      <a class="button" href="{{ url_for('login') }}">Log in</a>
+      <a class="button secondary" href="{{ url_for('signup') }}">Sign up</a>
+    </div>
+  </div>
+</section>
+{% endblock %}

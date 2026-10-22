@@ -1,0 +1,53 @@
+        <div class="crossword-layout">
+          <div class="crossword-grid" role="group" aria-label="Weekly Bokword crossword grid">
+            {% for index in range(225) %}
+              {% set row = index // 15 %}
+              {% set col = index % 15 %}
+              {% if crossword.solution[index] != '#' %}
+                {% set starts = crossword_entries
+                  |selectattr('row', 'equalto', row)
+                  |selectattr('col', 'equalto', col)
+                  |rejectattr('hidden')
+                  |list %}
+                <label class="crossword-square{% if crossword_completed %} is-revealed{% endif %}{% if index in crossword_connected_cells %} is-connected{% endif %}"
+                       aria-label="Row {{ row + 1 }}, column {{ col + 1 }}"
+                       data-crossword-square="{{ index }}"
+                       data-row="{{ row + 1 }}" data-col="{{ col + 1 }}"
+                       style="grid-row: {{ row + 1 }}; grid-column: {{ col + 1 }};">
+                  {% if starts %}
+                    <small data-crossword-start-number="{{ index }}">{{ starts|map(attribute='display_number')|join('/') }}</small>
+                  {% endif %}
+                  {% if not crossword_completed %}
+                    <input class="crossword-cell" type="text" maxlength="1" autocomplete="off"
+                           data-crossword-cell="{{ index }}">
+                  {% else %}
+                    <span aria-hidden="true">{{ crossword_answers[index] }}</span>
+                  {% endif %}
+                </label>
+              {% else %}
+                <div class="crossword-square is-blocked" aria-hidden="true"
+                     style="grid-row: {{ row + 1 }}; grid-column: {{ col + 1 }};"></div>
+              {% endif %}
+            {% endfor %}
+          </div>
+          <div class="crossword-clues">
+            {% for direction in ['across', 'down'] %}
+              <section>
+                <h3>{{ direction|capitalize }}</h3>
+                <ol>
+                  {% for clue in crossword_entries if clue.direction == direction %}
+                    <li data-crossword-entry data-direction="{{ clue.direction }}"
+                        data-row="{{ clue.row }}" data-col="{{ clue.col }}"
+                        data-length="{{ clue.length }}"
+                        {% if clue.partner %}data-partner="{{ clue.partner }}"{% endif %}
+                        data-key="{{ clue.key }}" data-role="{{ clue.role }}"
+                        {% if clue.hidden %}hidden{% endif %}>
+                      <span class="crossword-clue-number">{{ clue.display_number }}.</span> {{ clue.hint }}
+                      <span class="crossword-answer-length">({{ clue.lengths }})</span>
+                    </li>
+                  {% endfor %}
+                </ol>
+              </section>
+            {% endfor %}
+          </div>
+        </div>
