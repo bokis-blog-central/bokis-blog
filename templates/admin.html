@@ -7,6 +7,38 @@
   <h1 class="page-title">Admin</h1>
   <p class="muted">{{ stats.users }} users, {{ stats.posts }} posts, {{ stats.likes }} likes.</p>
 
+  {% if is_admin %}<section class="admin-block" id="scores" aria-labelledby="scores-title">
+    <h2 id="scores-title">Victory counts</h2>
+    <p class="help">Search for a user to set their cumulative Bokword and Boknections victories. Admin accounts do not appear on the public Scores page.</p>
+    <form method="post" action="{{ url_for('admin_scores') }}" class="stack" data-score-search-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="field-group">
+        <label for="score-user-search">User</label>
+        <input id="score-user-search" type="search" autocomplete="off" maxlength="24"
+               placeholder="Search users" data-score-search
+               data-search-url="{{ url_for('search_admin_users') }}"
+               aria-controls="score-user-results" aria-describedby="score-user-help">
+        <input name="user_id" type="hidden" data-score-user-id>
+        <p class="help" id="score-user-help">Search for a user and pick them from the list.</p>
+        <ul class="search-results" id="score-user-results" data-score-results aria-live="polite"></ul>
+      </div>
+      <div class="score-admin-counters" data-score-counters hidden>
+        <div class="field-group">
+          <label for="bokword-victories">Bokword victories</label>
+          <input id="bokword-victories" name="bokword_victories" type="number" min="0" max="2147483647" required>
+        </div>
+        <div class="field-group">
+          <label for="boknections-victories">Boknections victories</label>
+          <input id="boknections-victories" name="boknections_victories" type="number" min="0" max="2147483647" required>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="button" type="submit">Save victory counts</button>
+        <button class="button secondary" type="button" data-score-clear>Clear selection</button>
+      </div>
+    </form>
+  </section>{% endif %}
+
   {% if is_admin %}<section class="admin-block" aria-labelledby="feat-title">
     <h2 id="feat-title">Featured post of the week</h2>
     <form method="post" action="{{ url_for('admin_featured') }}" class="stack" data-admin-search-form>

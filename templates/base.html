@@ -21,6 +21,7 @@
           <li><a href="{{ url_for('home') }}" {% if request.endpoint == 'home' %}aria-current="page"{% endif %}>Home</a></li>
           {% if g.user %}
             <li><a href="{{ url_for('explore') }}" {% if request.endpoint == 'explore' %}aria-current="page"{% endif %}>Explore</a></li>
+            <li><a href="{{ url_for('scores') }}" {% if request.endpoint == 'scores' %}aria-current="page"{% endif %}>Scores</a></li>
             <li><a href="{{ url_for('new_post') }}" {% if request.endpoint == 'new_post' %}aria-current="page"{% endif %}>Write</a></li>
             <li><a href="{{ url_for('profile', username=g.user.username) }}" {% if request.endpoint == 'profile' and (request.view_args or {}).get('username') == g.user.username %}aria-current="page"{% endif %}>{{ user_name(g.user.username, g.user.crossword_star) }}</a></li>
             {% if not g.user.is_admin and (g.can_bokword or g.can_boknections) %}

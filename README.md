@@ -35,6 +35,9 @@ A small multi-user blog built with Flask and SQLite.
   them. Each user has 10 checks and can check categories one at a time; correct categories lock and reveal their titles.
   Solvers earn a flower by their username and a win on their profile. Saving a new
   puzzle in the admin page resets attempts and flowers but keeps win counts.
+- Scores page: logged-in users can view separate Bokword and Boknections rankings
+  for all non-admin players. Admins can manually adjust cumulative victory counts
+  from the Admin page.
 
 ## Setup
 

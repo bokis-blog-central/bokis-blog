@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% from "_macros.html" import user_name %}
+{% block title %}Scores | {% endblock %}
+{% block content %}
+<div class="wrap page narrow">
+  <h1 class="page-title">Scores</h1>
+  <p class="muted">All non-admin players ranked by victories.</p>
+
+  <nav class="score-tabs" aria-label="Score games">
+    <a href="{{ url_for('scores', game='bokword') }}" {% if game == 'bokword' %}aria-current="page"{% endif %}>Bokword</a>
+    <a href="{{ url_for('scores', game='boknections') }}" {% if game == 'boknections' %}aria-current="page"{% endif %}>Boknections</a>
+  </nav>
+
+  {% if score_users %}
+    <ol class="ranked scores-list">
+      {% for score_user in score_users %}
+        <li>
+          <strong class="score-rank">{{ loop.index }}</strong>
+          <div class="score-user">
+            <a href="{{ url_for('profile', username=score_user.username) }}">{{ user_name(score_user.username) }}</a>
+            <strong>{{ score_user.victories }} {{ 'victory' if score_user.victories == 1 else 'victories' }}</strong>
+          </div>
+        </li>
+      {% endfor %}
+    </ol>
+  {% else %}
+    <p class="empty">No players have scores yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

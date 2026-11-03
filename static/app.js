@@ -961,6 +961,84 @@ function initializeLikeButtons() {
   });
 }
 
+function initializeScoreAdminSearch() {
+  document.querySelectorAll("[data-score-search-form]").forEach((form) => {
+    const input = form.querySelector("[data-score-search]");
+    const selectedId = form.querySelector("[data-score-user-id]");
+    const results = form.querySelector("[data-score-results]");
+    const help = document.getElementById(input?.getAttribute("aria-describedby"));
+    const counters = form.querySelector("[data-score-counters]");
+    const bokword = form.elements.namedItem("bokword_victories");
+    const boknections = form.elements.namedItem("boknections_victories");
+    const clearButton = form.querySelector("[data-score-clear]");
+    if (!input || !selectedId || !results || !help || !counters ||
+        !bokword || !boknections || !clearButton) return;
+
+    let timer = null;
+    let requestSequence = 0;
+    const clearResults = () => results.replaceChildren();
+    const clearSelection = () => {
+      selectedId.value = "";
+      input.value = "";
+      bokword.value = "";
+      boknections.value = "";
+      counters.hidden = true;
+      help.textContent = "Search for a user and pick them from the list.";
+      clearResults();
+    };
+
+    input.addEventListener("input", () => {
+      selectedId.value = "";
+      counters.hidden = true;
+      help.textContent = "Choose a result before editing victory counts.";
+      clearResults();
+      window.clearTimeout(timer);
+      const sequence = ++requestSequence;
+      const query = input.value.trim();
+      if (query.length < 2) return;
+      timer = window.setTimeout(async () => {
+        try {
+          const endpoint = new URL(input.dataset.searchUrl, window.location.origin);
+          endpoint.searchParams.set("q", query);
+          const response = await fetch(endpoint, { headers: { Accept: "application/json" }, credentials: "same-origin" });
+          if (!response.ok) throw new Error(`Search failed (${response.status}).`);
+          const data = await response.json();
+          if (sequence !== requestSequence || input.value.trim() !== query) return;
+          data.results.forEach((result) => {
+            const item = document.createElement("li");
+            const option = document.createElement("button");
+            option.type = "button";
+            option.textContent = result.label;
+            option.addEventListener("click", () => {
+              selectedId.value = String(result.id);
+              input.value = result.label;
+              bokword.value = result.bokword_victories;
+              boknections.value = result.boknections_victories;
+              counters.hidden = false;
+              help.textContent = `Editing ${result.label}.`;
+              clearResults();
+            });
+            item.append(option);
+            results.append(item);
+          });
+          if (!data.results.length) help.textContent = "No matches found.";
+        } catch (error) {
+          if (sequence === requestSequence) help.textContent = error.message;
+        }
+      }, 200);
+    });
+
+    form.addEventListener("submit", (event) => {
+      if (!selectedId.value) {
+        event.preventDefault();
+        help.textContent = "Select a user before saving victory counts.";
+        input.focus();
+      }
+    });
+    clearButton.addEventListener("click", clearSelection);
+  });
+}
+
 initializeColorControls();
 initializeAvatarCrop();
 function initializeArchiveFilter() {
@@ -978,4 +1056,5 @@ initializeAdminCrossword();
 initializeCrosswordSolver();
 initializeBoknections();
 initializeAdminSearch();
+initializeScoreAdminSearch();
 initializeLikeButtons();

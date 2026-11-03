@@ -1035,6 +1035,26 @@ def explore():
                            posts=posts, total=total, page=page, pages=pages)
 
 
+@app.get("/scores")
+@login_required
+def scores():
+    game = request.args.get("game", "bokword")
+    score_column = {
+        "bokword": "bokword_victories",
+        "boknections": "boknections_victories",
+    }.get(game)
+    if score_column is None:
+        game = "bokword"
+        score_column = "bokword_victories"
+    score_users = db().execute(
+        f"""SELECT id, username, {score_column} AS victories
+            FROM users
+            WHERE is_admin = 0 AND username <> ? COLLATE NOCASE
+            ORDER BY victories DESC, username COLLATE NOCASE""",
+        (COWARD_USERNAME,)).fetchall()
+    return render_template("scores.html", game=game, score_users=score_users)
+
+
 @app.get("/post/<int:post_id>")
 def post(post_id):
     row = get_post(post_id)
@@ -1696,10 +1716,15 @@ def search_admin_users():
     query = request.args.get("q", "").strip()[:100]
     pattern = like_pattern(query)
     rows = db().execute(
-        "SELECT id, username FROM users WHERE username LIKE ? ESCAPE '\\' "
+        "SELECT id, username, bokword_victories, boknections_victories "
+        "FROM users WHERE username LIKE ? ESCAPE '\\' "
         "AND username <> ? COLLATE NOCASE ORDER BY username LIMIT 12",
         (pattern, COWARD_USERNAME)).fetchall()
-    return jsonify(results=[{"id": r["id"], "label": r["username"]} for r in rows])
+    return jsonify(results=[
+        {"id": r["id"], "label": r["username"],
+         "bokword_victories": r["bokword_victories"],
+         "boknections_victories": r["boknections_victories"]}
+        for r in rows])
 
 
 @app.post("/admin/guest-author")
@@ -1725,6 +1750,28 @@ def admin_guest_author():
             set_setting(key, str(user["id"]))
             flash(f"{user['username']} is now the {label} guest author.", "ok")
     return redirect(url_for("admin") + "#guest-authors")
+
+
+@app.post("/admin/scores")
+@admin_required
+def admin_scores():
+    user_id = request.form.get("user_id", "").strip()
+    user = db().execute(
+        "SELECT id FROM users WHERE id = ? AND username <> ? COLLATE NOCASE",
+        (user_id, COWARD_USERNAME)).fetchone() if user_id.isdigit() else None
+    raw_bokword = request.form.get("bokword_victories", "").strip()
+    raw_boknections = request.form.get("boknections_victories", "").strip()
+    if user is None or any(
+            not value.isdigit() or int(value) > 2147483647
+            for value in (raw_bokword, raw_boknections)):
+        flash("Choose a user and enter whole victory counts from 0 to 2,147,483,647.", "error")
+        return redirect(url_for("admin") + "#scores")
+    db().execute(
+        "UPDATE users SET bokword_victories = ?, boknections_victories = ? "
+        "WHERE id = ?", (int(raw_bokword), int(raw_boknections), user["id"]))
+    db().commit()
+    flash("Victory counts updated.", "ok")
+    return redirect(url_for("admin") + "#scores")
 
 
 @app.post("/admin/boknections/toggle")
