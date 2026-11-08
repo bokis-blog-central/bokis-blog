@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Boknections archive | {% endblock %}
+{% block content %}
+<div class="wrap page narrow">
+  <p><a href="{{ url_for('boknections_archive') }}">&larr; Boknections archive</a></p>
+  <h1 class="page-title">Boknections cleared {{ entry.cleared_at|date }}</h1>
+  <ul class="meta">
+    <li>Original {{ 'victor' if victors|length == 1 else 'victors' }}:
+      {% if victors %}{% for name in victors %}{% if name in existing_users %}<a href="{{ url_for('profile', username=name) }}">{{ name }}</a>{% else %}{{ name }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}none{% endif %}
+    </li>
+  </ul>
+  <section class="boknections archive-boknections">
+    {% for category in puzzle.categories %}
+      <article class="bokn-field is-locked">
+        <h2>{{ category.title }}</h2>
+        <ul class="bokn-slots">{% for word in category.words %}<li class="bokn-tile">{{ word }}</li>{% endfor %}</ul>
+      </article>
+    {% endfor %}
+    <article class="bokn-field bokn-wild is-locked"><h2>Wild Card</h2><ul class="bokn-slots"><li class="bokn-tile">{{ puzzle.wild }}</li></ul></article>
+  </section>
+</div>
+{% endblock %}

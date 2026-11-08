@@ -17,7 +17,7 @@
         <li>
           <strong class="score-rank">{{ loop.index }}</strong>
           <div class="score-user">
-            <a href="{{ url_for('profile', username=score_user.username) }}">{{ user_name(score_user.username) }}</a>
+            <a href="{{ url_for('profile', username=score_user.username) }}">{{ user_name(score_user.username, score_user.crossword_star) }}</a>
             <strong>{{ score_user.victories }} {{ 'victory' if score_user.victories == 1 else 'victories' }}</strong>
           </div>
         </li>

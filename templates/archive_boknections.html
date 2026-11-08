@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Boknections archive | {% endblock %}
+{% block content %}
+<div class="wrap page narrow">
+  <h1 class="page-title">Boknections archive</h1>
+  <p class="muted">Every completed Boknections puzzle. Pick one to review its categories and original victors.</p>
+  <nav class="archive-tabs" aria-label="Game archives">
+    <a class="button secondary" href="{{ url_for('bokword_archive') }}">Bokword</a>
+    <a class="button secondary" href="{{ url_for('boknections_archive') }}">Boknections</a>
+  </nav>
+  {% if entries %}
+    <ol class="post-list">
+      {% for e in entries %}
+        <li class="post-item">
+          <time datetime="{{ e.cleared_at|iso }}">{{ e.cleared_at|date }}</time>
+          <div>
+            <h3><a href="{{ url_for('boknections_archive_entry', entry_id=e.id) }}">Boknections cleared {{ e.cleared_at|date }}</a></h3>
+            <ul class="meta"><li>{{ e.victor_count }} {{ 'victor' if e.victor_count == 1 else 'victors' }}</li></ul>
+          </div>
+        </li>
+      {% endfor %}
+    </ol>
+  {% else %}
+    <p class="empty">No archived Boknections puzzles yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

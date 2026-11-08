@@ -4,6 +4,10 @@
 <div class="wrap page narrow">
   <h1 class="page-title">Bokword archive</h1>
   <p class="muted">Every Weekly Bokword that has been cleared. Pick one to practice; no stars are awarded here.</p>
+  <nav class="archive-tabs" aria-label="Game archives">
+    <a class="button secondary" href="{{ url_for('bokword_archive') }}">Bokword</a>
+    <a class="button secondary" href="{{ url_for('boknections_archive') }}">Boknections</a>
+  </nav>
 
   <form class="archive-filter" method="get" action="{{ url_for('bokword_archive') }}" data-archive-filter>
     <div class="archive-filter-row">

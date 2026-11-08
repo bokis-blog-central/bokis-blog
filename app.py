@@ -160,6 +160,14 @@ CREATE TABLE IF NOT EXISTS bokword_archive (
     position   INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS boknections_archive (
+    id         INTEGER PRIMARY KEY,
+    puzzle     TEXT NOT NULL,
+    victors    TEXT NOT NULL DEFAULT '[]',
+    cleared_at TEXT NOT NULL DEFAULT (datetime('now')),
+    position   INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS boknections_state (
     id         INTEGER PRIMARY KEY CHECK (id = 1),
     puzzle     TEXT NOT NULL,
@@ -610,6 +618,20 @@ def guest_usernames():
     return g.guest_users
 
 
+def guest_game(username):
+    rows = db().execute(
+        "SELECT s.key FROM settings s JOIN users u "
+        "ON CAST(u.id AS TEXT) = s.value "
+        "WHERE u.username = ? AND s.key IN "
+        "('guest_author_bokword', 'guest_author_boknections')", (username,)
+    ).fetchall()
+    if any(row["key"] == "guest_author_boknections" for row in rows):
+        return "boknections"
+    if any(row["key"] == "guest_author_bokword" for row in rows):
+        return "bokword"
+    return None
+
+
 def flower_usernames():
     """Usernames that solved the current Boknections; one query per request."""
     if "flower_users" not in g:
@@ -749,6 +771,7 @@ def security_headers(resp):
 
 app.jinja_env.globals["csrf_token"] = lambda: session.get("csrf", "")
 app.jinja_env.globals["has_guest"] = lambda username: username in guest_usernames()
+app.jinja_env.globals["guest_game"] = guest_game
 app.jinja_env.globals["has_flower"] = lambda username: username in flower_usernames()
 
 
@@ -1047,7 +1070,12 @@ def scores():
         game = "bokword"
         score_column = "bokword_victories"
     score_users = db().execute(
-        f"""SELECT id, username, {score_column} AS victories
+        f"""SELECT id, username, {score_column} AS victories,
+                   EXISTS(
+                     SELECT 1 FROM crossword_completions c
+                     JOIN crossword_state s ON s.id = 1
+                     WHERE c.user_id = users.id AND c.puzzle_version = s.version
+                   ) AS crossword_star
             FROM users
             WHERE is_admin = 0 AND username <> ? COLLATE NOCASE
             ORDER BY victories DESC, username COLLATE NOCASE""",
@@ -1800,6 +1828,13 @@ def admin_save_boknections():
             (serialized,))
         flash("Boknections puzzle saved.", "ok")
     elif json.loads(state["puzzle"]) != puzzle:
+        old_puzzle = json.loads(state["puzzle"])
+        old_victors = [row["username"] for row in db().execute(
+            "SELECT u.username FROM boknections_progress p "
+            "JOIN users u ON u.id = p.user_id "
+            "WHERE p.puzzle_version = ? AND p.solved = 1",
+            (state["version"],)).fetchall()]
+        add_boknections_archive_entry(old_puzzle, old_victors)
         db().execute(
             "UPDATE boknections_state SET puzzle = ?, version = version + 1, "
             "updated_at = datetime('now') WHERE id = 1", (serialized,))
@@ -2076,7 +2111,7 @@ def admin_signup_password():
 
 
 # ----------------------------------------------------------------------
-# Bokword archive
+# Game archives
 # ----------------------------------------------------------------------
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -2101,6 +2136,17 @@ def add_archive_entry(solution, clues, victors, post_id=None, cleared_at=None):
         "VALUES (?, ?, ?, ?, COALESCE(?, datetime('now')), ?)",
         (solution, json.dumps(clues, ensure_ascii=False, sort_keys=True),
          json.dumps(victors, ensure_ascii=False), post_id, cleared_at, position))
+    return cursor.lastrowid
+
+
+def add_boknections_archive_entry(puzzle, victors, cleared_at=None):
+    top = db().execute("SELECT MIN(position) FROM boknections_archive").fetchone()[0]
+    position = 0 if top is None else top - 1
+    cursor = db().execute(
+        "INSERT INTO boknections_archive "
+        "(puzzle, victors, cleared_at, position) VALUES (?, ?, COALESCE(?, datetime('now')), ?)",
+        (json.dumps(puzzle, ensure_ascii=False, sort_keys=True),
+         json.dumps(victors, ensure_ascii=False), cleared_at, position))
     return cursor.lastrowid
 
 
@@ -2208,6 +2254,36 @@ def check_archive_bokword(entry_id):
     return jsonify(solved=solved)
 
 
+@app.get("/boknections-archive")
+def boknections_archive():
+    rows = db().execute(
+        "SELECT id, puzzle, victors, cleared_at FROM boknections_archive "
+        "ORDER BY cleared_at DESC, id DESC").fetchall()
+    entries = [{"id": row["id"], "puzzle": json.loads(row["puzzle"]),
+                "cleared_at": row["cleared_at"],
+                "victor_count": len(json.loads(row["victors"]))}
+               for row in rows]
+    return render_template("archive_boknections.html", entries=entries)
+
+
+@app.get("/boknections-archive/<int:entry_id>")
+def boknections_archive_entry(entry_id):
+    row = db().execute(
+        "SELECT id, puzzle, victors, cleared_at FROM boknections_archive WHERE id = ?",
+        (entry_id,)).fetchone()
+    if row is None:
+        abort(404)
+    victors = json.loads(row["victors"])
+    existing = set()
+    if victors:
+        marks = ",".join("?" for _ in victors)
+        existing = {r["username"] for r in db().execute(
+            f"SELECT username FROM users WHERE username IN ({marks})", victors)}
+    return render_template("archive_boknections_entry.html", entry=row,
+                           puzzle=json.loads(row["puzzle"]), victors=victors,
+                           existing_users=existing)
+
+
 @app.get("/admin/archive")
 @admin_required
 def admin_archive():
@@ -2216,7 +2292,16 @@ def admin_archive():
                 "victors": "\n".join(json.loads(r["victors"])),
                 "post_id": r["post_id"], "post_title": r["post_title"],
                 "post_author": r["post_author"]} for r in rows]
-    return render_template("admin_archive.html", entries=entries)
+    boknections_rows = db().execute(
+        "SELECT id, puzzle, victors, cleared_at, position FROM boknections_archive "
+        "ORDER BY position, id").fetchall()
+    boknections_entries = [{
+        "id": row["id"], "puzzle": json.loads(row["puzzle"]),
+        "victors": "\n".join(json.loads(row["victors"])),
+        "cleared_at": row["cleared_at"], "position": row["position"],
+    } for row in boknections_rows]
+    return render_template("admin_archive.html", entries=entries,
+                           boknections_entries=boknections_entries)
 
 
 @app.post("/admin/archive/add")
@@ -2295,6 +2380,86 @@ def admin_archive_move(entry_id):
                      (position, archive_id))
     db().commit()
     return redirect(url_for("admin_archive") + f"#entry-{entry_id}")
+
+
+@app.post("/admin/archive/boknections/add")
+@admin_required
+def admin_boknections_archive_add():
+    puzzle, error = validate_boknections_form(request.form)
+    cleared = valid_date(request.form.get("cleared_date", ""))
+    if not error and request.form.get("cleared_date") and not cleared:
+        error = "Enter a valid cleared date."
+    if error:
+        flash(error, "error")
+        return redirect(url_for("admin_archive"))
+    add_boknections_archive_entry(
+        puzzle, parse_victors(request.form.get("victors")),
+        f"{cleared} 12:00:00" if cleared else None)
+    db().commit()
+    flash("Boknections added to the archive.", "ok")
+    return redirect(url_for("admin_archive"))
+
+
+@app.post("/admin/archive/boknections/<int:entry_id>/update")
+@admin_required
+def admin_boknections_archive_update(entry_id):
+    row = db().execute(
+        "SELECT cleared_at FROM boknections_archive WHERE id = ?", (entry_id,)
+    ).fetchone()
+    if row is None:
+        abort(404)
+    puzzle, error = validate_boknections_form(request.form)
+    cleared = valid_date(request.form.get("cleared_date", ""))
+    if not error and not cleared:
+        error = "Enter a valid cleared date."
+    if error:
+        flash(error, "error")
+        return redirect(url_for("admin_archive"))
+    cleared_at = row["cleared_at"]
+    if cleared != cleared_at[:10]:
+        cleared_at = f"{cleared} 12:00:00"
+    db().execute(
+        "UPDATE boknections_archive SET puzzle = ?, victors = ?, cleared_at = ? "
+        "WHERE id = ?",
+        (json.dumps(puzzle, ensure_ascii=False, sort_keys=True),
+         json.dumps(parse_victors(request.form.get("victors")),
+                    ensure_ascii=False), cleared_at, entry_id))
+    db().commit()
+    flash("Boknections archive entry saved.", "ok")
+    return redirect(url_for("admin_archive") + f"#boknections-entry-{entry_id}")
+
+
+@app.post("/admin/archive/boknections/<int:entry_id>/delete")
+@admin_required
+def admin_boknections_archive_delete(entry_id):
+    db().execute("DELETE FROM boknections_archive WHERE id = ?", (entry_id,))
+    db().commit()
+    flash("Boknections removed from the archive.", "ok")
+    return redirect(url_for("admin_archive"))
+
+
+@app.post("/admin/archive/boknections/<int:entry_id>/move")
+@admin_required
+def admin_boknections_archive_move(entry_id):
+    row = db().execute(
+        "SELECT position FROM boknections_archive WHERE id = ?", (entry_id,)
+    ).fetchone()
+    if row is None:
+        abort(404)
+    direction = request.form.get("direction")
+    if direction not in ("up", "down"):
+        abort(400)
+    ids = [r["id"] for r in db().execute(
+        "SELECT id FROM boknections_archive ORDER BY position, id")]
+    index = ids.index(entry_id)
+    other = index - 1 if direction == "up" else index + 1
+    if 0 <= other < len(ids):
+        ids[index], ids[other] = ids[other], ids[index]
+        for position, archive_id in enumerate(ids):
+            db().execute("UPDATE boknections_archive SET position = ? WHERE id = ?",
+                         (position, archive_id))
+        db().commit()
+    return redirect(url_for("admin_archive") + f"#boknections-entry-{entry_id}")
 
 
 # ----------------------------------------------------------------------

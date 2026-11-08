@@ -18,7 +18,7 @@
 {% endmacro %}
 
 {% macro user_name(username, crossword_star=false) %}
-  {{ username }}{% if has_guest(username) %}<span class="guest-badge" role="img" aria-label="Guest game author" title="Guest game author"></span>{% endif %}{% if crossword_star %}<span class="achievement-star" role="img" aria-label="Solved the current Weekly Bokword" title="Solved the current Weekly Bokword">★</span>{% endif %}{% if has_flower(username) %}<span class="achievement-flower" role="img" aria-label="Solved the current Boknections, Wild Card" title="Solved the current Boknections, Wild Card">✿</span>{% endif %}
+  {{ username }}{% if has_guest(username) %}<span class="guest-badge guest-badge-{{ guest_game(username) }}" role="img" aria-label="{{ 'Boknections' if guest_game(username) == 'boknections' else 'Bokword' }} guest game author" title="{{ 'Boknections' if guest_game(username) == 'boknections' else 'Bokword' }} guest game author"></span>{% endif %}{% if crossword_star %}<span class="achievement-star" role="img" aria-label="Solved the current Weekly Bokword" title="Solved the current Weekly Bokword">★</span>{% endif %}{% if has_flower(username) %}<span class="achievement-flower" role="img" aria-label="Solved the current Boknections, Wild Card" title="Solved the current Boknections, Wild Card">✿</span>{% endif %}
 {% endmacro %}
 
 {% macro post_row(post, next) %}

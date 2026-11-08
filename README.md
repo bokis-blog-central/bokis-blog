@@ -38,6 +38,9 @@ A small multi-user blog built with Flask and SQLite.
 - Scores page: logged-in users can view separate Bokword and Boknections rankings
   for all non-admin players. Admins can manually adjust cumulative victory counts
   from the Admin page.
+- Game archives: cleared Bokwords and replaced Boknections puzzles are preserved
+  with their original victors; admins can edit archived puzzles from the collapsed
+  archive editor.
 
 ## Setup
 

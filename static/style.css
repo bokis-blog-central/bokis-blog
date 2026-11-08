@@ -669,6 +669,11 @@ textarea { resize: vertical; line-height: 1.6; }
 .admin-block h2 { font-size: 1.35rem; margin-bottom: 0.5rem; }
 .score-admin-counters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
 .score-admin-counters input[type="number"] { background: var(--surface); color: var(--ink); }
+.archive-tabs { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-bottom: 1.5rem; }
+.archive-admin-entry { padding-block: 1rem; }
+.archive-admin-entry summary { cursor: pointer; font: 700 1.2rem var(--font-display); }
+.archive-admin-content { padding-top: 1rem; }
+.archive-admin-heading { margin-top: 2rem; }
 
 /* ---------- Footer ---------- */
 
@@ -690,6 +695,7 @@ textarea { resize: vertical; line-height: 1.6; }
 .settings-cog { text-decoration: underline; text-underline-offset: 0.15em; color: inherit; margin-right: 0.15em; }
 
 .guest-badge { display: inline-block; width: 0.6em; height: 0.6em; background: #2E9E4F; margin-left: 0.3em; vertical-align: baseline; }
+.guest-badge-boknections { border-radius: 50%; background: #2878C8; }
 
 /* ---------- Bokword archive filter ---------- */
 
