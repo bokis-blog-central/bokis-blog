@@ -241,7 +241,7 @@ function initializeAdminCrosswordForm(form) {
     applyConnections(entries);
   };
 
-  // An answer referenced by a ~!conn tag has no hint field and no grid number.
+  // Connected answers have no grid number, but may connect onward.
   const applyConnections = (entries) => {
     const referenced = new Set();
     form.querySelectorAll("[data-crossword-clue]").forEach((input) => {
@@ -265,7 +265,8 @@ function initializeAdminCrosswordForm(form) {
       }
       if (input) {
         input.required = !hidden;
-        input.closest("label").hidden = hidden;
+        input.closest("label").hidden = false;
+        input.placeholder = hidden ? "Optional: connect onward with ~!conn..." : `Hint for ${entry.number}`;
       }
       if (hidden) return;
       const cellIndex = entry.row * 15 + entry.col;
@@ -443,11 +444,10 @@ function initializeCrosswordSolver() {
     const inside = neighbour(index, direction, step);
     if (inside) return { cell: inside, dir: direction };
     const entry = entryAt(wordIndexes(index)[0], direction);
-    const partner = entry?.dataset.partner
-      && document.querySelector(`[data-crossword-entry][data-key="${entry.dataset.partner}"]`);
+    const partnerKey = step === 1 ? entry?.dataset.next : entry?.dataset.previous;
+    const partner = partnerKey
+      && document.querySelector(`[data-crossword-entry][data-key="${partnerKey}"]`);
     if (!partner) return null;
-    const role = entry.dataset.role;
-    if (!((step === 1 && role === "owner") || (step === -1 && role === "target"))) return null;
     const first = Number(partner.dataset.row) * GRID_SIZE + Number(partner.dataset.col);
     const stride = partner.dataset.direction === "across" ? 1 : GRID_SIZE;
     const partnerCells = Array.from({ length: Number(partner.dataset.length) },
@@ -466,14 +466,16 @@ function initializeCrosswordSolver() {
       ?.closest(".crossword-square")?.classList.add("is-active-word");
     const indexes = wordIndexes(index);
     indexes.forEach(mark);
-    // Highlight the connected partner word too.
-    const entry = entryAt(indexes[0], direction);
-    const partner = entry?.dataset.partner
-      && document.querySelector(`[data-crossword-entry][data-key="${entry.dataset.partner}"]`);
-    if (partner) {
-      const step = partner.dataset.direction === "across" ? 1 : GRID_SIZE;
-      const first = Number(partner.dataset.row) * GRID_SIZE + Number(partner.dataset.col);
-      for (let n = 0; n < Number(partner.dataset.length); n += 1) mark(first + n * step);
+    let entry = entryAt(indexes[0], direction);
+    while (entry?.dataset.previous) {
+      entry = document.querySelector(`[data-crossword-entry][data-key="${entry.dataset.previous}"]`);
+    }
+    while (entry) {
+      const step = entry.dataset.direction === "across" ? 1 : GRID_SIZE;
+      const first = Number(entry.dataset.row) * GRID_SIZE + Number(entry.dataset.col);
+      for (let n = 0; n < Number(entry.dataset.length); n += 1) mark(first + n * step);
+      entry = entry.dataset.next
+        ? document.querySelector(`[data-crossword-entry][data-key="${entry.dataset.next}"]`) : null;
     }
   };
 
@@ -691,7 +693,9 @@ function initializeAdminSearch() {
     const clearResults = () => results.replaceChildren();
     input.addEventListener("input", () => {
       selectedId.value = "";
-      help.textContent = "Choose a result, or leave the search empty to clear the selection.";
+      help.textContent = form.hasAttribute("data-delete-user-form")
+        ? "Choose a user from the list."
+        : "Choose a result, or leave the search empty to clear the selection.";
       clearResults();
       window.clearTimeout(timer);
       const sequence = ++requestSequence;
@@ -735,7 +739,9 @@ function initializeAdminSearch() {
     form.addEventListener("submit", (event) => {
       if (input.value.trim() && !selectedId.value) {
         event.preventDefault();
-        help.textContent = "Select a search result before saving, or clear the search to remove the current selection.";
+        help.textContent = form.hasAttribute("data-delete-user-form")
+          ? "Select a user from the list."
+          : "Select a search result before saving, or clear the search to remove the current selection.";
         input.focus();
       }
     });
@@ -743,7 +749,9 @@ function initializeAdminSearch() {
     clearButton.addEventListener("click", () => {
       selectedId.value = "";
       input.value = "";
-      help.textContent = "No selection. Saving will clear this setting.";
+      help.textContent = form.hasAttribute("data-delete-user-form")
+        ? "No user selected."
+        : "No selection. Saving will clear this setting.";
       clearResults();
       input.focus();
     });
@@ -970,9 +978,10 @@ function initializeScoreAdminSearch() {
     const counters = form.querySelector("[data-score-counters]");
     const bokword = form.elements.namedItem("bokword_victories");
     const boknections = form.elements.namedItem("boknections_victories");
+    const bokopsaraki = form.elements.namedItem("bokopsaraki_victories");
     const clearButton = form.querySelector("[data-score-clear]");
     if (!input || !selectedId || !results || !help || !counters ||
-        !bokword || !boknections || !clearButton) return;
+        !bokword || !boknections || !bokopsaraki || !clearButton) return;
 
     let timer = null;
     let requestSequence = 0;
@@ -982,6 +991,7 @@ function initializeScoreAdminSearch() {
       input.value = "";
       bokword.value = "";
       boknections.value = "";
+      bokopsaraki.value = "";
       counters.hidden = true;
       help.textContent = "Search for a user and pick them from the list.";
       clearResults();
@@ -1014,6 +1024,7 @@ function initializeScoreAdminSearch() {
               input.value = result.label;
               bokword.value = result.bokword_victories;
               boknections.value = result.boknections_victories;
+              bokopsaraki.value = result.bokopsaraki_victories;
               counters.hidden = false;
               help.textContent = `Editing ${result.label}.`;
               clearResults();
@@ -1039,6 +1050,79 @@ function initializeScoreAdminSearch() {
   });
 }
 
+function initializeWordCells() {
+  const cellsInRow = (cell) => Array.from(cell.closest(".word-grid").querySelectorAll("[data-word-cell]"));
+  document.querySelectorAll("[data-word-length-form]").forEach((form) => {
+    const lengthInput = form.querySelector("[data-word-length]");
+    lengthInput.addEventListener("input", () => {
+      if (!lengthInput.validity.valid || !lengthInput.value) return;
+      const length = Number(lengthInput.value);
+      form.querySelectorAll("[data-word-editor]").forEach((editor) => {
+        const cells = Array.from(editor.querySelectorAll("[data-word-cell]"));
+        while (cells.length > length) cells.pop().closest("label").remove();
+        while (cells.length < length) {
+          const label = document.createElement("label");
+          label.className = "crossword-square";
+          const text = document.createElement("span");
+          text.className = "sr";
+          text.textContent = `${editor.dataset.wordLabel}, letter ${cells.length + 1}`;
+          const input = document.createElement("input");
+          input.type = "text";
+          input.name = `${editor.dataset.wordName}_letter`;
+          input.maxLength = 1;
+          input.autocomplete = "off";
+          input.required = true;
+          input.dataset.wordCell = "";
+          label.append(text, input);
+          editor.append(label);
+          cells.push(input);
+        }
+        editor.style.setProperty("--columns", length);
+      });
+    });
+  });
+  document.addEventListener("focusin", (event) => {
+    if (event.target.matches("[data-word-cell]")) event.target.select();
+  });
+  document.addEventListener("input", (event) => {
+    const cell = event.target;
+    if (!cell.matches("[data-word-cell]") || event.isComposing) return;
+    cell.value = normalizeCrosswordCell(cell.value).replace("#", "");
+    if (cell.value) {
+      const cells = cellsInRow(cell);
+      cells[cells.indexOf(cell) + 1]?.focus();
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    const cell = event.target;
+    if (!cell.matches("[data-word-cell]")) return;
+    const cells = cellsInRow(cell);
+    const index = cells.indexOf(cell);
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      event.preventDefault();
+      cells[index + (event.key === "ArrowLeft" ? -1 : 1)]?.focus();
+    } else if (event.key === "Backspace" && !cell.value && index > 0) {
+      event.preventDefault();
+      cells[index - 1].value = "";
+      cells[index - 1].focus();
+    }
+  });
+  document.addEventListener("paste", (event) => {
+    const cell = event.target;
+    if (!cell.matches("[data-word-cell]")) return;
+    const letters = Array.from(event.clipboardData.getData("text").normalize("NFC"))
+      .map(normalizeCrosswordCell).filter((letter) => letter && letter !== "#");
+    if (!letters.length) return;
+    event.preventDefault();
+    const cells = cellsInRow(cell);
+    const start = cells.indexOf(cell);
+    letters.slice(0, cells.length - start).forEach((letter, offset) => {
+      cells[start + offset].value = letter;
+    });
+    cells[Math.min(start + letters.length, cells.length - 1)].focus();
+  });
+}
+
 initializeColorControls();
 initializeAvatarCrop();
 function initializeArchiveFilter() {
@@ -1051,10 +1135,41 @@ function initializeArchiveFilter() {
   });
 }
 
+function initializeUserPagination() {
+  const storageKey = "user-pagination-scroll";
+  window.addEventListener("pageshow", () => {
+    try {
+      const saved = sessionStorage.getItem(storageKey);
+      if (!saved) return;
+      sessionStorage.removeItem(storageKey);
+      const position = JSON.parse(saved);
+      if (position.url === window.location.href) window.scrollTo(position.x, position.y);
+    } catch (error) {
+      console.error("Could not restore user pagination scroll position:", error);
+    }
+  });
+
+  document.querySelectorAll("[data-user-pagination] .pagination a").forEach((link) => {
+    link.addEventListener("click", (event) => {
+      if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey ||
+          event.shiftKey || event.altKey || link.target || link.hasAttribute("download")) return;
+      try {
+        sessionStorage.setItem(storageKey, JSON.stringify({
+          url: link.href, x: window.scrollX, y: window.scrollY,
+        }));
+      } catch (error) {
+        console.error("Could not save user pagination scroll position:", error);
+      }
+    });
+  });
+}
+
 initializeArchiveFilter();
+initializeUserPagination();
 initializeAdminCrossword();
 initializeCrosswordSolver();
 initializeBoknections();
 initializeAdminSearch();
 initializeScoreAdminSearch();
+initializeWordCells();
 initializeLikeButtons();

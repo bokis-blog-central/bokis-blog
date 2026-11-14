@@ -39,8 +39,9 @@
                     <li data-crossword-entry data-direction="{{ clue.direction }}"
                         data-row="{{ clue.row }}" data-col="{{ clue.col }}"
                         data-length="{{ clue.length }}"
-                        {% if clue.partner %}data-partner="{{ clue.partner }}"{% endif %}
-                        data-key="{{ clue.key }}" data-role="{{ clue.role }}"
+                        {% if clue.previous %}data-previous="{{ clue.previous }}"{% endif %}
+                        {% if clue.next %}data-next="{{ clue.next }}"{% endif %}
+                        data-key="{{ clue.key }}"
                         {% if clue.hidden %}hidden{% endif %}>
                       <span class="crossword-clue-number">{{ clue.display_number }}.</span> {{ clue.hint }}
                       <span class="crossword-answer-length">({{ clue.lengths }})</span>

@@ -4,6 +4,8 @@ Run it with:   flask --app app run
 Full setup steps are in README.md.
 """
 import json
+import hmac
+import gzip
 import os
 import random
 import re
@@ -13,7 +15,7 @@ import time
 import uuid
 import unicodedata
 from datetime import datetime
-from functools import wraps
+from functools import lru_cache, wraps
 
 import click
 from flask import (Flask, abort, flash, g, jsonify, redirect, render_template,
@@ -184,6 +186,31 @@ CREATE TABLE IF NOT EXISTS boknections_progress (
     solved         INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (user_id, puzzle_version)
 );
+
+CREATE TABLE IF NOT EXISTS bokopsaraki_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    start_word TEXT NOT NULL,
+    end_word TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS bokopsaraki_progress (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    puzzle_version INTEGER NOT NULL,
+    current_word TEXT NOT NULL,
+    solved INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, puzzle_version)
+);
+CREATE TABLE IF NOT EXISTS bokopsaraki_words (
+    word TEXT PRIMARY KEY
+);
+CREATE TABLE IF NOT EXISTS bokopsaraki_history (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    puzzle_version INTEGER NOT NULL,
+    word TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS bokopsaraki_history_player
+    ON bokopsaraki_history(user_id, puzzle_version, id);
 """
 
 
@@ -198,6 +225,7 @@ def migrate_db():
     conn.executescript(SCHEMA)
     conn.execute("DELETE FROM settings WHERE key = 'spotlight_user_id'")
     user_columns = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+    comment_columns = {row[1] for row in conn.execute("PRAGMA table_info(comments)")}
     if "email" in user_columns:
         conn.execute("DROP INDEX IF EXISTS users_email_unique")
         conn.execute("ALTER TABLE users DROP COLUMN email")
@@ -210,6 +238,8 @@ def migrate_db():
             "profile_bg": "TEXT NOT NULL DEFAULT '#D9DD92'",
             "profile_text": "TEXT NOT NULL DEFAULT '#2E2836'",
             "boknections_victories": "INTEGER NOT NULL DEFAULT 0",
+            "bokopsaraki_victories": "INTEGER NOT NULL DEFAULT 0",
+            "session_nonce": "TEXT NOT NULL DEFAULT ''",
         },
         "posts": {
             "image": "TEXT",
@@ -227,6 +257,7 @@ def migrate_db():
             "image": "TEXT",
             "parent_id": "INTEGER REFERENCES comments(id) ON DELETE SET NULL",
             "edited_at": "TEXT",
+            "is_deleted": "INTEGER NOT NULL DEFAULT 0",
         },
     }
     for table, columns in migrations.items():
@@ -234,6 +265,19 @@ def migrate_db():
         for column, definition in columns.items():
             if column not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+    if "is_deleted" not in comment_columns:
+        conn.execute(
+            "UPDATE comments SET is_deleted = 1 WHERE user_id IN "
+            "(SELECT id FROM users WHERE username = ? COLLATE NOCASE)",
+            (COWARD_USERNAME,))
+    conn.execute(
+        "UPDATE users SET session_nonce = lower(hex(randomblob(32))) WHERE session_nonce = ''")
+    conn.execute(
+        """CREATE TRIGGER IF NOT EXISTS users_session_nonce AFTER INSERT ON users
+           WHEN NEW.session_nonce = ''
+           BEGIN
+             UPDATE users SET session_nonce = lower(hex(randomblob(32))) WHERE id = NEW.id;
+           END""")
     if "bokword_victories" not in user_columns:
         conn.execute(
             "ALTER TABLE users ADD COLUMN bokword_victories "
@@ -438,8 +482,16 @@ def crossword_connections(entries, clues):
             return None, "A connection must join an across answer with a down answer."
         connections[entry["key"]] = target["key"]
     targets = list(connections.values())
-    if len(set(targets)) != len(targets) or set(targets) & set(connections):
-        return None, "Each answer can be connected only once, and a connected answer cannot own a connection."
+    if len(set(targets)) != len(targets):
+        return None, "Each answer can only be the target of one connection."
+    for start in connections:
+        visited = set()
+        current = start
+        while current in connections:
+            if current in visited:
+                return None, "Snake-word connections cannot form a cycle."
+            visited.add(current)
+            current = connections[current]
     return connections, None
 
 
@@ -509,7 +561,7 @@ def validate_crossword(solution_text, clues_text):
 
 
 # ----------------------------------------------------------------------
-# Boknections, Wild Card (monthly game)
+# Wild Card Boknections (monthly game)
 # ----------------------------------------------------------------------
 
 BOKNECTIONS_ATTEMPTS = 10
@@ -518,6 +570,42 @@ BOKNECTIONS_GROUPS = 4
 
 def boknections_enabled():
     return get_setting("boknections_enabled") == "1"
+
+
+def greek_word_key(value):
+    normalized = unicodedata.normalize("NFD", value.strip().casefold())
+    return "".join(char for char in normalized if not unicodedata.combining(char))
+
+
+def valid_greek_word(word):
+    return 2 <= len(word) <= 40 and all("α" <= char <= "ω" for char in word)
+
+
+@lru_cache(maxsize=1)
+def greek_dictionary():
+    path = os.path.join(BASE_DIR, "data", "greek-el-GR.dic.gz")
+    with gzip.open(path, "rt", encoding="iso8859-7") as words:
+        count = int(next(words).strip())
+        entries = [greek_word_key(line) for line in words]
+    if len(entries) != count:
+        raise ValueError("The Greek dictionary is incomplete.")
+    return frozenset(word for word in entries if valid_greek_word(word))
+
+
+def get_bokopsaraki():
+    return db().execute(
+        "SELECT start_word, end_word, version FROM bokopsaraki_state WHERE id = 1"
+    ).fetchone()
+
+
+def fish_usernames():
+    if "fish_users" not in g:
+        rows = db().execute(
+            "SELECT u.username FROM bokopsaraki_progress p "
+            "JOIN bokopsaraki_state s ON s.id = 1 AND s.version = p.puzzle_version "
+            "JOIN users u ON u.id = p.user_id WHERE p.solved = 1").fetchall()
+        g.fish_users = {row["username"] for row in rows}
+    return g.fish_users
 
 
 def get_boknections():
@@ -731,7 +819,7 @@ def load_user_and_check_csrf():
     user_id = session.get("user_id")
     if user_id:
         g.user = db().execute(
-            """SELECT u.id, u.username, u.is_admin,
+            """SELECT u.id, u.username, u.is_admin, u.password_hash, u.session_nonce,
                       EXISTS(
                         SELECT 1 FROM crossword_completions c
                         JOIN crossword_state s ON s.id = 1
@@ -739,7 +827,9 @@ def load_user_and_check_csrf():
                       ) AS crossword_star
                FROM users u WHERE u.id = ?""",
             (user_id,)).fetchone()
-        if g.user is None:
+        if g.user is None or g.user["username"].casefold() == COWARD_USERNAME.casefold() or not hmac.compare_digest(
+                session.get("auth_binding", ""), user_auth_binding(g.user)):
+            g.user = None
             session.clear()
     g.can_bokword = g.can_boknections = False
     if g.user:
@@ -773,6 +863,7 @@ app.jinja_env.globals["csrf_token"] = lambda: session.get("csrf", "")
 app.jinja_env.globals["has_guest"] = lambda username: username in guest_usernames()
 app.jinja_env.globals["guest_game"] = guest_game
 app.jinja_env.globals["has_flower"] = lambda username: username in flower_usernames()
+app.jinja_env.globals["has_fish"] = lambda username: username in fish_usernames()
 
 
 @app.context_processor
@@ -884,9 +975,19 @@ def throttled(bucket, limit, window):
     return False
 
 
+def user_auth_binding(user):
+    return hmac.digest(
+        app.config["SECRET_KEY"].encode("utf-8"),
+        f'{user["id"]}:{user["session_nonce"]}:{user["password_hash"]}'.encode("utf-8"),
+        "sha256").hex()
+
+
 def log_in(user_id):
+    user = db().execute(
+        "SELECT id, password_hash, session_nonce FROM users WHERE id = ?", (user_id,)).fetchone()
     session.clear()
     session["user_id"] = user_id
+    session["auth_binding"] = user_auth_binding(user)
     session["csrf"] = secrets.token_urlsafe(32)
     session.permanent = True
 
@@ -907,21 +1008,24 @@ def crossword_view(crossword):
         hint = render_hint(crossword["clues"].get(entry["key"], ""))
         entry["hint"] = hint
         entry["hidden"] = entry["key"] in owner_of
-        entry["role"] = ("owner" if entry["key"] in connections
-                         else "target" if entry["key"] in owner_of else "")
-        entry["partner"] = (connections.get(entry["key"])
-                            or owner_of.get(entry["key"]))
+        entry["previous"] = owner_of.get(entry["key"])
+        entry["next"] = connections.get(entry["key"])
         # Snake-word targets are not hints of their own, so they use no number.
         if not entry["hidden"]:
             shown[entry["direction"]] += 1
             entry["display_number"] = shown[entry["direction"]]
-        total = entry["length"]
-        if entry["key"] in connections:
-            total += by_key[connections[entry["key"]]]["length"]
-        entry["lengths"] = str(total)
+        cells = set()
+        current = entry["key"]
+        while current:
+            part = by_key[current]
+            step = 1 if part["direction"] == "across" else 15
+            start = part["row"] * 15 + part["col"]
+            cells.update(start + step * i for i in range(part["length"]))
+            current = connections.get(current)
+        entry["lengths"] = str(len(cells))
     connected_cells = set()
     for entry in entries:
-        if entry["partner"]:
+        if entry["previous"] or entry["next"]:
             step = 1 if entry["direction"] == "across" else 15
             start = entry["row"] * 15 + entry["col"]
             connected_cells.update(start + step * i for i in range(entry["length"]))
@@ -989,9 +1093,31 @@ def home():
             progress = get_boknections_progress(g.user["id"], puzzle["version"])
             boknections = boknections_board(puzzle, progress)
 
+    bokopsaraki = None
+    if get_setting("bokopsaraki_enabled") == "1":
+        puzzle = get_bokopsaraki()
+        if puzzle:
+            progress = db().execute(
+                "SELECT current_word, solved FROM bokopsaraki_progress "
+                "WHERE user_id = ? AND puzzle_version = ?",
+                (g.user["id"], puzzle["version"])).fetchone()
+            history = [row["word"] for row in db().execute(
+                "SELECT word FROM bokopsaraki_history WHERE user_id = ? AND puzzle_version = ? ORDER BY id",
+                (g.user["id"], puzzle["version"]))]
+            if progress and not history and progress["current_word"] != puzzle["start_word"]:
+                history = [progress["current_word"]]
+            bokopsaraki = {
+                "puzzle": puzzle,
+                "current": progress["current_word"] if progress else puzzle["start_word"],
+                "solved": bool(progress["solved"]) if progress else False,
+                "history": history,
+            }
+        else:
+            bokopsaraki = {"puzzle": None}
+
     return render_template("home.html", top_week=top_week, featured=featured,
                            latest_admin_post=latest_admin_post,
-                           boknections=boknections,
+                           boknections=boknections, bokopsaraki=bokopsaraki,
                            crossword=crossword,
                            crossword_entries=crossword_entries_list,
                            crossword_connected_cells=connected_cells,
@@ -1010,52 +1136,47 @@ def explore():
     if sort not in SORTS:
         sort = "new"
     page = request.args.get("page", 1, type=int)
+    user_page = request.args.get("user_page", 1, type=int)
 
-    users, posts, total, pages = [], [], 0, 1
+    users, posts, total, pages, user_total, user_pages = [], [], 0, 1, 0, 1
+    if kind in ("all", "users"):
+        if q:
+            user_where = ("u.username LIKE ? ESCAPE '\\' AND "
+                          "(u.username <> ? COLLATE NOCASE OR u.username = ? COLLATE NOCASE)")
+            user_params = (like_pattern(q), COWARD_USERNAME, q)
+        else:
+            user_where = "u.username <> ? COLLATE NOCASE"
+            user_params = (COWARD_USERNAME,)
+        user_total = db().execute(
+            f"SELECT COUNT(*) FROM users u WHERE {user_where}", user_params).fetchone()[0]
+        user_pages = max(1, -(-user_total // PER_PAGE))
+        user_page = min(max(user_page, 1), user_pages)
+        users = db().execute(
+            f"""SELECT u.username, u.created_at, u.avatar,
+                       u.avatar_position_x, u.avatar_position_y,
+                       EXISTS(
+                         SELECT 1 FROM crossword_completions c
+                         JOIN crossword_state s ON s.id = 1
+                         WHERE c.user_id = u.id AND c.puzzle_version = s.version
+                       ) AS crossword_star,
+                       (SELECT COUNT(*) FROM posts WHERE user_id = u.id) AS post_count
+                FROM users u WHERE {user_where}
+                ORDER BY u.username COLLATE NOCASE, u.id LIMIT ? OFFSET ?""",
+            (*user_params, PER_PAGE, (user_page - 1) * PER_PAGE)).fetchall()
     if q:
         pattern = like_pattern(q)
-        if kind in ("all", "users"):
-            users = db().execute(
-                """SELECT u.username, u.created_at, u.avatar,
-                          u.avatar_position_x, u.avatar_position_y,
-                          EXISTS(
-                            SELECT 1 FROM crossword_completions c
-                            JOIN crossword_state s ON s.id = 1
-                            WHERE c.user_id = u.id AND c.puzzle_version = s.version
-                          ) AS crossword_star,
-                          (SELECT COUNT(*) FROM posts WHERE user_id = u.id) AS post_count
-                   FROM users u WHERE u.username LIKE ? ESCAPE '\\'
-                     AND (u.username <> ? COLLATE NOCASE OR u.username = ? COLLATE NOCASE)
-                   ORDER BY u.username LIMIT 20""",
-                (pattern, COWARD_USERNAME, q.strip())).fetchall()
         if kind in ("all", "posts"):
             posts, total, page, pages = fetch_posts(
                 "(p.title LIKE ? ESCAPE '\\' OR p.body LIKE ? ESCAPE '\\' "
-                "OR u.username LIKE ? ESCAPE '\\') "
-                "AND (u.username <> ? COLLATE NOCASE OR u.username = ? COLLATE NOCASE)",
-                (pattern, pattern, pattern, COWARD_USERNAME, q.strip()), sort, page)
+                "OR u.username LIKE ? ESCAPE '\\')",
+                (pattern, pattern, pattern), sort, page)
     else:
-        # Show users when search is empty
-        if kind in ("all", "users"):
-            users = db().execute(
-                """SELECT u.username, u.created_at, u.avatar,
-                          u.avatar_position_x, u.avatar_position_y,
-                          EXISTS(
-                            SELECT 1 FROM crossword_completions c
-                            JOIN crossword_state s ON s.id = 1
-                            WHERE c.user_id = u.id AND c.puzzle_version = s.version
-                          ) AS crossword_star,
-                          (SELECT COUNT(*) FROM posts WHERE user_id = u.id) AS post_count
-                   FROM users u
-                   WHERE u.username <> ? COLLATE NOCASE
-                   ORDER BY u.username LIMIT 20""", (COWARD_USERNAME,)).fetchall()
         if kind in ("all", "posts"):
-            posts, total, page, pages = fetch_posts(
-                "u.username <> ? COLLATE NOCASE", (COWARD_USERNAME,),
-                sort=sort, page=page)
+            posts, total, page, pages = fetch_posts(sort=sort, page=page)
 
     return render_template("explore.html", q=q, kind=kind, sort=sort, users=users,
-                           posts=posts, total=total, page=page, pages=pages)
+                           posts=posts, total=total, page=page, pages=pages,
+                           user_total=user_total, user_page=user_page, user_pages=user_pages)
 
 
 @app.get("/scores")
@@ -1065,6 +1186,7 @@ def scores():
     score_column = {
         "bokword": "bokword_victories",
         "boknections": "boknections_victories",
+        "bokopsaraki": "bokopsaraki_victories",
     }.get(game)
     if score_column is None:
         game = "bokword"
@@ -1077,10 +1199,12 @@ def scores():
                      WHERE c.user_id = users.id AND c.puzzle_version = s.version
                    ) AS crossword_star
             FROM users
-            WHERE is_admin = 0 AND username <> ? COLLATE NOCASE
+            WHERE is_admin = 0 AND username <> ? COLLATE NOCASE AND {score_column} > 0
             ORDER BY victories DESC, username COLLATE NOCASE""",
         (COWARD_USERNAME,)).fetchall()
-    return render_template("scores.html", game=game, score_users=score_users)
+    return render_template("scores.html", game=game, score_users=score_users,
+                           boknections_enabled=boknections_enabled(),
+                           bokopsaraki_enabled=get_setting("bokopsaraki_enabled") == "1")
 
 
 @app.get("/post/<int:post_id>")
@@ -1090,7 +1214,7 @@ def post(post_id):
         abort(404)
     is_featured = get_setting("featured_post_id") == str(post_id)
     rows = db().execute(
-        """SELECT c.id, c.body, c.created_at, c.image, c.parent_id, c.edited_at,
+        """SELECT c.id, c.body, c.created_at, c.image, c.parent_id, c.edited_at, c.is_deleted,
                   c.user_id, u.username, u.avatar,
                   u.avatar_position_x, u.avatar_position_y,
                   EXISTS(
@@ -1122,7 +1246,7 @@ def profile(username):
     user = db().execute(
         """SELECT u.id, u.username, u.created_at, u.bio, u.avatar,
                   u.avatar_position_x, u.avatar_position_y, u.profile_bg, u.profile_text,
-                  u.bokword_victories, u.boknections_victories,
+                  u.bokword_victories, u.boknections_victories, u.bokopsaraki_victories,
                   EXISTS(
                     SELECT 1 FROM crossword_completions c
                     JOIN crossword_state s ON s.id = 1
@@ -1390,7 +1514,7 @@ def edit_comment(comment_id):
     row = get_comment(comment_id)
     if row["user_id"] != g.user["id"] and not g.user["is_admin"]:
         abort(403, "You can only edit your own comments.")
-    if row["username"] == COWARD_USERNAME:
+    if row["is_deleted"]:
         abort(403, "Deleted comments can't be edited.")
     body, image_data, error = comment_input(allow_empty_body=True)
     new_image = None
@@ -1428,7 +1552,7 @@ def delete_comment(comment_id):
     if has_replies:
         db().execute(
             "UPDATE comments SET user_id = ?, body = ?, image = NULL, "
-            "edited_at = NULL WHERE id = ?",
+            "edited_at = NULL, is_deleted = 1 WHERE id = ?",
             (coward_id(), DELETED_COMMENT_TEXT, comment_id))
     else:
         parent_id = row["parent_id"]
@@ -1436,10 +1560,10 @@ def delete_comment(comment_id):
         # Drop placeholder ancestors that no longer have any replies.
         while parent_id is not None:
             parent = db().execute(
-                "SELECT c.id, c.parent_id, c.image, u.username FROM comments c "
+                "SELECT c.id, c.parent_id, c.image, c.is_deleted FROM comments c "
                 "JOIN users u ON u.id = c.user_id WHERE c.id = ?",
                 (parent_id,)).fetchone()
-            if parent is None or parent["username"] != COWARD_USERNAME or \
+            if parent is None or not parent["is_deleted"] or \
                     db().execute("SELECT 1 FROM comments WHERE parent_id = ?",
                                  (parent["id"],)).fetchone():
                 break
@@ -1470,7 +1594,8 @@ def login():
             (username,)).fetchone()
         # Always run a hash check so response time does not reveal valid usernames.
         stored = user["password_hash"] if user else generate_password_hash("x")
-        if check_password_hash(stored, password) and user:
+        if check_password_hash(stored, password) and user and \
+                username.casefold() != COWARD_USERNAME.casefold():
             log_in(user["id"])
             return redirect(next_url or url_for("home"))
         flash("Wrong username or password.", "error")
@@ -1574,6 +1699,10 @@ def change_password():
         db().execute("UPDATE users SET password_hash = ? WHERE id = ?",
                      (generate_password_hash(new), g.user["id"]))
         db().commit()
+        user = db().execute(
+            "SELECT id, password_hash, session_nonce FROM users WHERE id = ?",
+            (g.user["id"],)).fetchone()
+        session["auth_binding"] = user_auth_binding(user)
         flash("Password changed.", "ok")
     return redirect(url_for("account_settings"))
 
@@ -1588,26 +1717,29 @@ def delete_account():
         flash("Your current password is incorrect; your account was not deleted.", "error")
         return redirect(url_for("account_settings"))
 
-    post_rows = db().execute(
-        "SELECT id, image FROM posts WHERE user_id = ?", (g.user["id"],)).fetchall()
-    filenames = [row["avatar"]] + [post["image"] for post in post_rows]
-    filenames += [r[0] for r in db().execute(
-        "SELECT image FROM comments WHERE image IS NOT NULL AND "
-        "(user_id = ? OR post_id IN (SELECT id FROM posts WHERE user_id = ?))",
-        (g.user["id"], g.user["id"]))]
-    post_ids = [str(post["id"]) for post in post_rows]
-    if post_ids:
-        placeholders = ",".join("?" for _ in post_ids)
-        db().execute(
-            f"DELETE FROM settings WHERE key = 'featured_post_id' "
-            f"AND value IN ({placeholders})", post_ids)
-    db().execute("DELETE FROM users WHERE id = ?", (g.user["id"],))
-    db().commit()
-    for filename in filenames:
-        remove_uploaded_image(filename)
+    remove_user_account(g.user["id"], row["avatar"])
     session.clear()
-    flash("Your account and its posts have been deleted.", "ok")
+    flash("Your account was deleted. Your posts and comments now belong to Coward.", "ok")
     return redirect(url_for("home"))
+
+
+def remove_user_account(user_id, avatar):
+    user = db().execute("SELECT username FROM users WHERE id = ?", (user_id,)).fetchone()
+    placeholder_id = coward_id()
+    if user_id == placeholder_id:
+        raise ValueError("The Coward account cannot be removed.")
+    db().execute(
+        "UPDATE posts SET user_id = ?, body = body || ? WHERE user_id = ?",
+        (placeholder_id, f"\n\nOriginally by {user['username']}", user_id))
+    db().execute(
+        "UPDATE comments SET user_id = ?, body = body || ? WHERE user_id = ?",
+        (placeholder_id, f"\n\nOriginally by {user['username']}", user_id))
+    db().execute(
+        "DELETE FROM settings WHERE key IN ('guest_author_bokword', 'guest_author_boknections') "
+        "AND value = ?", (str(user_id),))
+    db().execute("DELETE FROM users WHERE id = ?", (user_id,))
+    db().commit()
+    remove_uploaded_image(avatar)
 
 
 def signup_unlocked():
@@ -1735,6 +1867,10 @@ def admin():
     return render_template("admin.html", stats=stats, featured_post=featured_post,
                            is_admin=is_admin, guest_authors=guest_authors,
                            bokword_guest=bokword_guest,
+                           bokopsaraki=get_bokopsaraki(),
+                           bokopsaraki_enabled=get_setting("bokopsaraki_enabled") == "1",
+                           bokopsaraki_words=db().execute(
+                               "SELECT word FROM bokopsaraki_words ORDER BY word").fetchall(),
                            **crossword_admin_context())
 
 
@@ -1744,14 +1880,15 @@ def search_admin_users():
     query = request.args.get("q", "").strip()[:100]
     pattern = like_pattern(query)
     rows = db().execute(
-        "SELECT id, username, bokword_victories, boknections_victories "
+        "SELECT id, username, bokword_victories, boknections_victories, bokopsaraki_victories "
         "FROM users WHERE username LIKE ? ESCAPE '\\' "
         "AND username <> ? COLLATE NOCASE ORDER BY username LIMIT 12",
         (pattern, COWARD_USERNAME)).fetchall()
     return jsonify(results=[
         {"id": r["id"], "label": r["username"],
          "bokword_victories": r["bokword_victories"],
-         "boknections_victories": r["boknections_victories"]}
+         "boknections_victories": r["boknections_victories"],
+         "bokopsaraki_victories": r["bokopsaraki_victories"]}
         for r in rows])
 
 
@@ -1789,17 +1926,43 @@ def admin_scores():
         (user_id, COWARD_USERNAME)).fetchone() if user_id.isdigit() else None
     raw_bokword = request.form.get("bokword_victories", "").strip()
     raw_boknections = request.form.get("boknections_victories", "").strip()
+    raw_bokopsaraki = request.form.get("bokopsaraki_victories", "").strip()
     if user is None or any(
             not value.isdigit() or int(value) > 2147483647
-            for value in (raw_bokword, raw_boknections)):
+            for value in (raw_bokword, raw_boknections, raw_bokopsaraki)):
         flash("Choose a user and enter whole victory counts from 0 to 2,147,483,647.", "error")
         return redirect(url_for("admin") + "#scores")
     db().execute(
-        "UPDATE users SET bokword_victories = ?, boknections_victories = ? "
-        "WHERE id = ?", (int(raw_bokword), int(raw_boknections), user["id"]))
+        "UPDATE users SET bokword_victories = ?, boknections_victories = ?, "
+        "bokopsaraki_victories = ? WHERE id = ?",
+        (int(raw_bokword), int(raw_boknections), int(raw_bokopsaraki), user["id"]))
     db().commit()
     flash("Victory counts updated.", "ok")
     return redirect(url_for("admin") + "#scores")
+
+
+@app.post("/admin/users/delete")
+@admin_required
+def admin_delete_user():
+    user_id = request.form.get("user_id", "").strip()
+    user = db().execute(
+        "SELECT id, username, avatar FROM users WHERE id = ? "
+        "AND username <> ? COLLATE NOCASE",
+        (user_id, COWARD_USERNAME)).fetchone() if user_id.isdigit() else None
+    admin = db().execute(
+        "SELECT password_hash FROM users WHERE id = ?", (g.user["id"],)).fetchone()
+    if user is None:
+        flash("Choose a user from the list.", "error")
+    elif user["id"] == g.user["id"]:
+        flash("Use account settings to delete your own account.", "error")
+    elif request.form.get("confirm_username", "").strip() != user["username"]:
+        flash("Enter the selected username exactly to confirm deletion.", "error")
+    elif not check_password_hash(admin["password_hash"], request.form.get("current_password", "")):
+        flash("Your password is incorrect; the account was not deleted.", "error")
+    else:
+        remove_user_account(user["id"], user["avatar"])
+        flash(f"The account {user['username']} was deleted. Its posts and comments now belong to Coward.", "ok")
+    return redirect(url_for("admin") + "#remove-user")
 
 
 @app.post("/admin/boknections/toggle")
@@ -1807,9 +1970,137 @@ def admin_scores():
 def admin_toggle_boknections():
     enabled = request.form.get("enabled") == "1"
     set_setting("boknections_enabled", "1" if enabled else "0")
-    flash("Boknections, Wild Card is now "
+    flash("Wild Card Boknections is now "
           + ("shown on the home page." if enabled else "hidden."), "ok")
     return games_redirect("#boknections")
+
+
+@app.post("/admin/bokopsaraki/toggle")
+@admin_required
+def admin_toggle_bokopsaraki():
+    enabled = request.form.get("enabled") == "1"
+    set_setting("bokopsaraki_enabled", "1" if enabled else "0")
+    flash("ΜΠΟΚΟΨΑΡΑΚΙΑ is now " + ("shown." if enabled else "hidden."), "ok")
+    return redirect(url_for("admin") + "#bokopsaraki")
+
+
+@app.post("/admin/bokopsaraki")
+@admin_required
+def admin_save_bokopsaraki():
+    start = greek_word_key(word_from_form("start_word"))
+    end = greek_word_key(word_from_form("end_word"))
+    if not valid_greek_word(start) or not valid_greek_word(end) or len(start) != len(end) or start == end:
+        flash("Enter two different Greek words of the same length (2 to 40 letters).", "error")
+        return redirect(url_for("admin") + "#bokopsaraki")
+    db().execute("BEGIN IMMEDIATE")
+    current = get_bokopsaraki()
+    if current is None:
+        db().execute("INSERT INTO bokopsaraki_state (id, start_word, end_word) VALUES (1, ?, ?)",
+                     (start, end))
+        flash("ΜΠΟΚΟΨΑΡΑΚΙΑ puzzle saved.", "ok")
+    elif (current["start_word"], current["end_word"]) != (start, end):
+        db().execute("UPDATE bokopsaraki_state SET start_word = ?, end_word = ?, "
+                     "version = version + 1 WHERE id = 1", (start, end))
+        db().execute("DELETE FROM bokopsaraki_progress")
+        db().execute("DELETE FROM bokopsaraki_history")
+        flash("ΜΠΟΚΟΨΑΡΑΚΙΑ puzzle changed; progress and 🟘 badges were reset.", "ok")
+    else:
+        flash("No ΜΠΟΚΟΨΑΡΑΚΙΑ changes to save.", "info")
+    db().commit()
+    return redirect(url_for("admin") + "#bokopsaraki")
+
+
+@app.post("/admin/bokopsaraki/words")
+@admin_required
+def admin_bokopsaraki_words():
+    action = request.form.get("action")
+    word = greek_word_key(word_from_form("word"))
+    if action not in ("add", "remove") or not valid_greek_word(word):
+        flash("Enter a Greek word of 2 to 40 letters and choose an action.", "error")
+    elif action == "add":
+        db().execute("INSERT OR IGNORE INTO bokopsaraki_words (word) VALUES (?)", (word,))
+        db().commit()
+        flash("Word added to the custom wordlist.", "ok")
+    else:
+        db().execute("DELETE FROM bokopsaraki_words WHERE word = ?", (word,))
+        db().commit()
+        flash("Word removed from the custom wordlist.", "ok")
+    return redirect(url_for("admin") + "#bokopsaraki-words")
+
+
+def word_from_form(name):
+    letters = request.form.getlist(name + "_letter")
+    if letters:
+        if any(len(unicodedata.normalize("NFC", letter)) != 1 for letter in letters):
+            return ""
+        return "".join(letters)
+    return request.form.get(name, "")
+
+
+@app.post("/bokopsaraki/play")
+@login_required
+def play_bokopsaraki():
+    action = request.form.get("action")
+    version = request.form.get("version", type=int)
+    if action not in ("guess", "reset"):
+        abort(400, "Invalid game action.")
+    guess = greek_word_key(word_from_form("word")) if action == "guess" else ""
+    dictionary = greek_dictionary() if action == "guess" and valid_greek_word(guess) else frozenset()
+    db().execute("BEGIN IMMEDIATE")
+    puzzle = get_bokopsaraki()
+    if get_setting("bokopsaraki_enabled") != "1" or puzzle is None or version != puzzle["version"]:
+        db().rollback()
+        flash("The puzzle is unavailable or has changed; reload and try again.", "error")
+        return redirect(url_for("home") + "#bokopsaraki")
+    progress = db().execute(
+        "SELECT current_word, solved FROM bokopsaraki_progress WHERE user_id = ? AND puzzle_version = ?",
+        (g.user["id"], version)).fetchone()
+    current = progress["current_word"] if progress else puzzle["start_word"]
+    solved = bool(progress["solved"]) if progress else False
+    if action == "reset":
+        db().execute("DELETE FROM bokopsaraki_history WHERE user_id = ? AND puzzle_version = ?",
+                     (g.user["id"], version))
+        db().execute(
+            "INSERT INTO bokopsaraki_progress (user_id, puzzle_version, current_word, solved) "
+            "VALUES (?, ?, ?, ?) ON CONFLICT(user_id, puzzle_version) "
+            "DO UPDATE SET current_word = excluded.current_word",
+            (g.user["id"], version, puzzle["start_word"], int(solved)))
+        flash("Word reset to the start.", "ok")
+    elif (not valid_greek_word(guess) or len(guess) != len(current)
+          or sum(a != b for a, b in zip(guess, current)) != 1):
+        db().rollback()
+        flash("Change exactly one Greek letter to make a word of the same length.", "error")
+        return redirect(url_for("home") + "#bokopsaraki")
+    elif (guess != puzzle["end_word"] and guess not in dictionary
+          and not db().execute("SELECT 1 FROM bokopsaraki_words WHERE word = ?", (guess,)).fetchone()):
+        db().rollback()
+        flash("That word is not in the Greek wordlist.", "error")
+        return redirect(url_for("home") + "#bokopsaraki")
+    else:
+        reached_end = guess == puzzle["end_word"]
+        new_victory = reached_end and not solved
+        solved = solved or reached_end
+        if current != puzzle["start_word"] and not db().execute(
+                "SELECT 1 FROM bokopsaraki_history WHERE user_id = ? AND puzzle_version = ?",
+                (g.user["id"], version)).fetchone():
+            db().execute(
+                "INSERT INTO bokopsaraki_history (user_id, puzzle_version, word) VALUES (?, ?, ?)",
+                (g.user["id"], version, current))
+        db().execute(
+            "INSERT INTO bokopsaraki_history (user_id, puzzle_version, word) VALUES (?, ?, ?)",
+            (g.user["id"], version, guess))
+        db().execute(
+            "INSERT INTO bokopsaraki_progress (user_id, puzzle_version, current_word, solved) "
+            "VALUES (?, ?, ?, ?) ON CONFLICT(user_id, puzzle_version) "
+            "DO UPDATE SET current_word = excluded.current_word, solved = excluded.solved",
+            (g.user["id"], version, guess, int(solved)))
+        if new_victory:
+            db().execute("UPDATE users SET bokopsaraki_victories = bokopsaraki_victories + 1 WHERE id = ?",
+                         (g.user["id"],))
+        flash("Puzzle solved! You earned a red 🟘." if new_victory else
+              "Puzzle solved again!" if reached_end else "Word accepted.", "ok")
+    db().commit()
+    return redirect(url_for("home") + "#bokopsaraki")
 
 
 @app.post("/admin/boknections")
@@ -1821,7 +2112,7 @@ def admin_save_boknections():
         return games_redirect("#boknections")
     serialized = json.dumps(puzzle, ensure_ascii=False, sort_keys=True)
     state = db().execute(
-        "SELECT puzzle FROM boknections_state WHERE id = 1").fetchone()
+        "SELECT puzzle, version FROM boknections_state WHERE id = 1").fetchone()
     if state is None:
         db().execute(
             "INSERT INTO boknections_state (id, puzzle, version) VALUES (1, ?, 1)",

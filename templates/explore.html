@@ -31,7 +31,7 @@
         <h2 class="section-title" id="posts-title">Posts ({{ total }})</h2>
         {% if posts %}
           <ol class="post-list">{% for p in posts %}{{ post_row(p, next) }}{% endfor %}</ol>
-          {{ pager('explore', page, pages, {'q': q, 'type': kind, 'sort': sort}) }}
+          {{ pager('explore', page, pages, {'q': q, 'type': kind, 'sort': sort, 'user_page': user_page}) }}
         {% else %}
           <p class="empty">No posts match &ldquo;{{ q }}&rdquo;. Try fewer or different words.</p>
         {% endif %}
@@ -39,10 +39,10 @@
     {% endif %}
 
     {% if kind in ('all', 'users') %}
-      <section aria-labelledby="users-title">
-        <h2 class="section-title" id="users-title">Users</h2>
+      <section aria-labelledby="users-title" data-user-pagination>
+        <h2 class="section-title" id="users-title">Users ({{ user_total }})</h2>
         {% if users %}
-          <ul class="user-list">
+          <ul class="user-list" aria-label="User results">
             {% for u in users %}
               <li>
                 {% if u.avatar %}<img class="avatar small" src="{{ url_for('uploaded_file', filename=u.avatar) }}" alt="" style="object-position: {{ u.avatar_position_x }}% {{ u.avatar_position_y }}%;">{% else %}<span class="avatar small" aria-hidden="true">{{ u.username[:2]|upper }}</span>{% endif %}
@@ -53,6 +53,7 @@
               </li>
             {% endfor %}
           </ul>
+          {{ pager('explore', user_page, user_pages, {'q': q, 'type': kind, 'sort': sort, 'page': page}, 'user_page', 'Previous', 'Next', 'User pagination') }}
         {% else %}
           <p class="empty">No users match &ldquo;{{ q }}&rdquo;.</p>
         {% endif %}
@@ -64,7 +65,7 @@
         <h2 class="section-title" id="all-title">All posts ({{ total }})</h2>
         {% if posts %}
           <ol class="post-list">{% for p in posts %}{{ post_row(p, next) }}{% endfor %}</ol>
-          {{ pager('explore', page, pages, {'sort': sort}) }}
+          {{ pager('explore', page, pages, {'type': kind, 'sort': sort, 'user_page': user_page}) }}
         {% else %}
           <p class="empty">Nothing has been published yet.</p>
         {% endif %}
@@ -72,10 +73,10 @@
     {% endif %}
 
     {% if kind in ('all', 'users') %}
-      <section aria-labelledby="users-title">
-        <h2 class="section-title" id="users-title">Users</h2>
+      <section aria-labelledby="users-title" data-user-pagination>
+        <h2 class="section-title" id="users-title">Users ({{ user_total }})</h2>
         {% if users %}
-          <ul class="user-list">
+          <ul class="user-list" aria-label="User results">
             {% for u in users %}
               <li>
                 {% if u.avatar %}<img class="avatar small" src="{{ url_for('uploaded_file', filename=u.avatar) }}" alt="" style="object-position: {{ u.avatar_position_x }}% {{ u.avatar_position_y }}%;">{% else %}<span class="avatar small" aria-hidden="true">{{ u.username[:2]|upper }}</span>{% endif %}
@@ -86,6 +87,7 @@
               </li>
             {% endfor %}
           </ul>
+          {{ pager('explore', user_page, user_pages, {'type': kind, 'sort': sort, 'page': page}, 'user_page', 'Previous', 'Next', 'User pagination') }}
         {% else %}
           <p class="empty">No users have joined yet.</p>
         {% endif %}

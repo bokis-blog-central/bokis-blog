@@ -2,6 +2,7 @@
   <section class="admin-block" id="crossword" aria-labelledby="crossword-title">
     <h2 id="crossword-title">Current Weekly Bokword{% if bokword_guest %} (guest author: {{ bokword_guest }}){% endif %}</h2>
     <p class="help">Enter Latin or Greek letters in answer cells and use # for blocked cells. To remove a block, focus its square and press Backspace or Delete. The empty square stays open so you can enter its answer letter. Clue starts and answer ends are determined by the grid. Changing the published puzzle clears its previous solver stars.</p>
+    <p class="help">To continue a snake, enter another ~!conn tag in the connected answer's optional clue. Connections must not form a cycle.</p>
     <form method="post" action="{{ url_for('admin_save_crossword') }}" class="stack" data-admin-crossword-form>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       {{ crossword_fields(crossword_rows, crossword_clues) }}

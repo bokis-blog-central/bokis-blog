@@ -9,7 +9,7 @@
 
   {% if is_admin %}<section class="admin-block" id="scores" aria-labelledby="scores-title">
     <h2 id="scores-title">Victory counts</h2>
-    <p class="help">Search for a user to set their cumulative Bokword and Boknections victories. Admin accounts do not appear on the public Scores page.</p>
+    <p class="help">Search for a user to set their cumulative game victories. Admin accounts do not appear on the public Scores page.</p>
     <form method="post" action="{{ url_for('admin_scores') }}" class="stack" data-score-search-form>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="field-group">
@@ -31,10 +31,44 @@
           <label for="boknections-victories">Boknections victories</label>
           <input id="boknections-victories" name="boknections_victories" type="number" min="0" max="2147483647" required>
         </div>
+        <div class="field-group">
+          <label for="bokopsaraki-victories">ΜΠΟΚΟΨΑΡΑΚΙΑ victories</label>
+          <input id="bokopsaraki-victories" name="bokopsaraki_victories" type="number" min="0" max="2147483647" required>
+        </div>
       </div>
       <div class="actions">
         <button class="button" type="submit">Save victory counts</button>
         <button class="button secondary" type="button" data-score-clear>Clear selection</button>
+      </div>
+    </form>
+  </section>{% endif %}
+
+  {% if is_admin %}<section class="admin-block danger-zone" id="remove-user" aria-labelledby="remove-user-title">
+    <h2 id="remove-user-title">Remove user account</h2>
+    <p class="help">Permanently deletes the account, its likes and profile picture. Posts and comments remain under Coward and name the original author. Use account settings to delete your own account.</p>
+    <form method="post" action="{{ url_for('admin_delete_user') }}" class="stack" data-admin-search-form data-delete-user-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="field-group">
+        <label for="remove-user-search">User</label>
+        <input id="remove-user-search" type="search" autocomplete="off" maxlength="24"
+               placeholder="Search users" data-admin-search
+               data-search-url="{{ url_for('search_admin_users') }}"
+               aria-controls="remove-user-results" aria-describedby="remove-user-help" required>
+        <input name="user_id" type="hidden" data-selected-id>
+        <p class="help" id="remove-user-help">Search for a user and pick them from the list.</p>
+        <ul class="search-results" id="remove-user-results" data-search-results aria-live="polite"></ul>
+      </div>
+      <div class="field-group">
+        <label for="remove-user-confirm">Type the selected username to confirm</label>
+        <input id="remove-user-confirm" name="confirm_username" type="text" maxlength="24" autocomplete="off" required>
+      </div>
+      <div class="field-group">
+        <label for="remove-user-password">Your admin password</label>
+        <input id="remove-user-password" name="current_password" type="password" autocomplete="current-password" required>
+      </div>
+      <div class="actions">
+        <button class="button danger" type="submit">Delete account</button>
+        <button class="button secondary" type="button" data-clear-selection>Clear selection</button>
       </div>
     </form>
   </section>{% endif %}
@@ -93,6 +127,8 @@
   {% include "_game_bokword.html" %}
 
   {% include "_game_boknections.html" %}
+
+  {% include "_game_bokopsaraki.html" %}
 
   {% if is_admin %}<section class="admin-block" aria-labelledby="pw-title">
     <h2 id="pw-title">Signup password</h2>

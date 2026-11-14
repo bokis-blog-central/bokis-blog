@@ -1,0 +1,59 @@
+<section class="admin-block" id="bokopsaraki" aria-labelledby="bokopsaraki-admin-title">
+  <h2 id="bokopsaraki-admin-title">ΜΠΟΚΟΨΑΡΑΚΙΑ</h2>
+  <p class="help">Choose two different Greek words of equal length. Accents and case are ignored. Changing the puzzle clears current progress and 🟘 badges but keeps victory counts.</p>
+  <form method="post" action="{{ url_for('admin_toggle_bokopsaraki') }}" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="enabled" value="{{ '0' if bokopsaraki_enabled else '1' }}">
+    <button class="button secondary" type="submit">{{ 'Hide game' if bokopsaraki_enabled else 'Show game' }}</button>
+  </form>
+  {% set word_length = bokopsaraki.start_word|length if bokopsaraki else 5 %}
+  <form method="post" action="{{ url_for('admin_save_bokopsaraki') }}" class="stack" data-word-length-form>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="field-group">
+      <label for="fish-length">Number of letters</label>
+      <input id="fish-length" type="number" min="2" max="40" value="{{ word_length }}" data-word-length required>
+    </div>
+    <div class="field-group">
+      <span id="fish-start-label">Starting word</span>
+      <div class="word-grid crossword-grid" style="--columns: {{ word_length }}" role="group" aria-labelledby="fish-start-label" data-word-editor data-word-name="start_word" data-word-label="Starting word">
+        {% for index in range(word_length) %}<label class="crossword-square"><span class="sr">Starting word, letter {{ index + 1 }}</span><input name="start_word_letter" type="text" maxlength="1" value="{{ bokopsaraki.start_word[index]|upper if bokopsaraki else '' }}" autocomplete="off" required data-word-cell></label>{% endfor %}
+      </div>
+    </div>
+    <div class="field-group">
+      <span id="fish-end-label">Destination word</span>
+      <div class="word-grid crossword-grid" style="--columns: {{ word_length }}" role="group" aria-labelledby="fish-end-label" data-word-editor data-word-name="end_word" data-word-label="Destination word">
+        {% for index in range(word_length) %}<label class="crossword-square"><span class="sr">Destination word, letter {{ index + 1 }}</span><input name="end_word_letter" type="text" maxlength="1" value="{{ bokopsaraki.end_word[index]|upper if bokopsaraki else '' }}" autocomplete="off" required data-word-cell></label>{% endfor %}
+      </div>
+    </div>
+    <button class="button" type="submit">Save puzzle</button>
+  </form>
+  <div id="bokopsaraki-words">
+    <h3>Extra Greek words</h3>
+    <p class="help">Add missing words to the built-in dictionary; accents and case are ignored.</p>
+    <form method="post" action="{{ url_for('admin_bokopsaraki_words') }}" class="stack" data-word-length-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="add">
+      <label for="fish-word-length">Number of letters</label>
+      <input id="fish-word-length" type="number" min="2" max="40" value="5" data-word-length required>
+      <span id="fish-word-label">Word</span>
+      <div class="word-grid crossword-grid" style="--columns: 5" role="group" aria-labelledby="fish-word-label" data-word-editor data-word-name="word" data-word-label="Word">
+        {% for index in range(5) %}<label class="crossword-square"><span class="sr">Word, letter {{ index + 1 }}</span><input name="word_letter" type="text" maxlength="1" autocomplete="off" required data-word-cell></label>{% endfor %}
+      </div>
+      <button class="button" type="submit">Add word</button>
+    </form>
+    {% if bokopsaraki_words %}
+      <ul>
+        {% for item in bokopsaraki_words %}
+          <li>{{ item.word|upper }}
+            <form method="post" action="{{ url_for('admin_bokopsaraki_words') }}" class="inline-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="action" value="remove">
+              <input type="hidden" name="word" value="{{ item.word }}">
+              <button type="submit" class="link-button" aria-label="Remove {{ item.word|upper }}">Remove</button>
+            </form>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </div>
+</section>

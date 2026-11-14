@@ -18,7 +18,7 @@
 {% endmacro %}
 
 {% macro user_name(username, crossword_star=false) %}
-  {{ username }}{% if has_guest(username) %}<span class="guest-badge guest-badge-{{ guest_game(username) }}" role="img" aria-label="{{ 'Boknections' if guest_game(username) == 'boknections' else 'Bokword' }} guest game author" title="{{ 'Boknections' if guest_game(username) == 'boknections' else 'Bokword' }} guest game author"></span>{% endif %}{% if crossword_star %}<span class="achievement-star" role="img" aria-label="Solved the current Weekly Bokword" title="Solved the current Weekly Bokword">★</span>{% endif %}{% if has_flower(username) %}<span class="achievement-flower" role="img" aria-label="Solved the current Boknections, Wild Card" title="Solved the current Boknections, Wild Card">✿</span>{% endif %}
+  {{ username }}{% if has_guest(username) %}<span class="guest-badge guest-badge-{{ guest_game(username) }}" role="img" aria-label="{{ 'Boknections' if guest_game(username) == 'boknections' else 'Bokword' }} guest game author" title="{{ 'Boknections' if guest_game(username) == 'boknections' else 'Bokword' }} guest game author"></span>{% endif %}{% if crossword_star %}<span class="achievement-star" role="img" aria-label="Solved the current Weekly Bokword" title="Solved the current Weekly Bokword">★</span>{% endif %}{% if has_flower(username) %}<span class="achievement-flower" role="img" aria-label="Solved the current Wild Card Boknections" title="Solved the current Wild Card Boknections">✿</span>{% endif %}{% if has_fish(username) %}<span class="achievement-fish" role="img" aria-label="Solved the current ΜΠΟΚΟΨΑΡΑΚΙΑ" title="Solved the current ΜΠΟΚΟΨΑΡΑΚΙΑ">🟘&#xFE0E;</span>{% endif %}
 {% endmacro %}
 
 {% macro post_row(post, next) %}
@@ -37,15 +37,15 @@
   </li>
 {% endmacro %}
 
-{% macro pager(endpoint, page, pages, args) %}
+{% macro pager(endpoint, page, pages, args, page_param='page', previous='Newer', following='Older', label='Pagination') %}
   {% if pages > 1 %}
-    <nav class="pagination" aria-label="Pagination">
+    <nav class="pagination" aria-label="{{ label }}">
       {% if page > 1 %}
-        <a href="{{ url_for(endpoint, page=page - 1, **args) }}" rel="prev">Newer</a>
+        <a href="{{ url_for(endpoint, **dict(args, **{page_param: page - 1})) }}" rel="prev">{{ previous }}</a>
       {% else %}<span></span>{% endif %}
       <span>Page {{ page }} of {{ pages }}</span>
       {% if page < pages %}
-        <a href="{{ url_for(endpoint, page=page + 1, **args) }}" rel="next">Older</a>
+        <a href="{{ url_for(endpoint, **dict(args, **{page_param: page + 1})) }}" rel="next">{{ following }}</a>
       {% else %}<span></span>{% endif %}
     </nav>
   {% endif %}

@@ -10,33 +10,49 @@ A small multi-user blog built with Flask and SQLite.
 - The sign-up page is locked behind a signup password that only the admin knows.
 - Home page: the featured post, an interactive weekly Bokword crossword, the
   4 most liked posts of the last 7 days, and the latest post by an admin.
-- Explore page: search posts (title, text, author) and users, or browse every post,
-  sorted by newest or most liked.
+- Explore page: search posts (title, text, author) and users, or browse posts and
+  users with independent pagination. Posts can be sorted by newest or most liked.
 - Write, edit and delete your own posts. Posts support an image, custom title,
   text, background, accent and surface colors, and comments. The site header and
   footer keep their fixed site colors. Admins can also delete posts.
 - Comments support an optional image, threaded replies, and a per-post comment
   count. Authors and admins can edit or delete comments. Deleting a comment that
   has replies keeps the replies: the comment becomes "I deleted my comment" by the
-  placeholder user "Coward" (password `IDELETECOMMENT`).
+  placeholder user "Coward", which cannot be used to log in.
 - Choose colors with a color wheel or enter a six-digit hex code; color previews
   update as you edit.
 - Admin page: search for the featured post, create and reset the 15x15 crossword,
-  and change the signup password. Crossword Across clues are numbered top to
+  remove user accounts, and change the signup password. Deleting an account
+  transfers its posts and comments to Coward, appends the original username to
+  each post and comment, and deletes its likes and profile picture. Comments by
+  other users on transferred posts keep their authors and content; they are
+  transferred only if their own accounts are later deleted. Crossword Across clues are numbered top to
   bottom and Down clues left to right, with separate numbering for each direction.
   Resetting the crossword saves an all-blocked grid, unpublishes the puzzle, and
   clears solver stars.
   Crossword solvers earn a star by their username
   until the puzzle is changed or reset, and each earned star adds to their
   cumulative Bokword victories on their profile. Crossword answers accept Latin
-  and Greek letters, including accented Greek vowels.
-- Boknections, Wild Card: an admin-togglable monthly game on the home page. Drag
+  and Greek letters, including accented Greek vowels. Snake words may form
+  chains: enter a `~!conn` tag in a connected answer's optional clue to continue
+  it. Each target has at most one incoming connection; cycles are not allowed.
+  A snake clue's length counts each shared grid cell only once.
+- Wild Card Boknections: an admin-togglable monthly game on the home page. Drag
   13 words into four 3-word categories plus the one wild card that fits all of
   them. Each user has 10 checks and can check categories one at a time; correct categories lock and reveal their titles.
   Solvers earn a flower by their username and a win on their profile. Saving a new
   puzzle in the admin page resets attempts and flowers but keeps win counts.
-- Scores page: logged-in users can view separate Bokword and Boknections rankings
-  for all non-admin players. Admins can manually adjust cumulative victory counts
+- ΜΠΟΚΟΨΑΡΑΚΙΑ: an admin-togglable Greek word ladder. Change one letter at a
+  time to reach the destination, with unlimited guesses and a reset button.
+  Accents and case are ignored. Admins can add missing words, select the two
+  endpoints, and toggle the game. A solver receives a red 🟘 until the
+  puzzle changes, and earns a cumulative victory. The destination selected by
+  the admin is accepted even if absent from the dictionary. Accepted words are
+  saved as a ladder of letter cells; restarting clears the ladder but keeps an
+  earned badge. Older progress can only show its last saved word.
+- Scores page: logged-in users can view separate Bokword, Boknections and ΜΠΟΚΟΨΑΡΑΚΙΑ rankings
+  for non-admin players with at least one victory in that game. Tabs for hidden games are hidden, while
+  saved scores remain available. Admins can manually adjust cumulative victory counts
   from the Admin page.
 - Game archives: cleared Bokwords and replaced Boknections puzzles are preserved
   with their original victors; admins can edit archived puzzles from the collapsed
@@ -67,6 +83,8 @@ Changing it invalidates existing login sessions. User passwords are stored as
 salted, one-way hashes and do not use `SECRET_KEY` for encryption.
 Email addresses are no longer collected; upgrading an existing database removes
 its email column and the values it contained.
+After upgrading, existing users must log in again. Changing a password also signs
+out the account's other sessions.
 
 To try it with sample content first, run `flask --app app seed-demo`. It adds users
 (admin, mara, jonas, priya, tomas, all with the password `demo-password`) and posts.
@@ -110,3 +128,9 @@ fine for a small site on one process.
 User-uploaded profile and post images are stored in
 `<BLOG_DATA_DIR>/uploads/`. Supported formats are PNG, JPEG, GIF and WebP, with
 a 5 MB limit per image. Back up this directory along with the database.
+
+The Greek wordlist is the el_GR Hunspell dictionary by Evripidis Papakostas,
+Steve Stavropulos and contributors, distributed under MPL 1.1/GPL 2.0/LGPL 2.1.
+The pinned source is
+https://github.com/elastic/hunspell/tree/cc1e74c4ca711f0625f6b73f883197794379aa97/dicts/el_GR.
+The dictionary notice and MPL 1.1 license are included in `data/`.

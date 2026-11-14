@@ -81,7 +81,7 @@
         <ol class="comment-list">
           {% for item in comments %}
             {% set comment = item.row %}
-            {% set is_deleted = comment.username == coward %}
+            {% set is_deleted = comment.is_deleted %}
             {% set can_manage = g.user and (g.user.id == comment.user_id or g.user.is_admin) %}
             <li class="comment depth-{{ item.depth }}" id="comment-{{ comment.id }}">
               {% if comment.avatar %}

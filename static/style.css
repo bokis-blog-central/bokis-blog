@@ -204,10 +204,14 @@ h1, h2, h3, h4 {
 .admin-crossword-cell.is-connected:not(.is-blocked) { background: #AC8E65; }
 .conn-paren { color: var(--accent); }
 .crossword-clues li[data-crossword-entry] { cursor: pointer; }
-.crossword-clues { display: grid; grid-template-columns: repeat(2, minmax(11rem, 1fr)); gap: 1rem; flex: 1 1 20rem; }
+.crossword-clues {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem;
+  flex: 1 1 23rem; min-width: min(100%, 23rem);
+}
+.crossword-clues section { min-width: 0; }
 .crossword-clues h3, .crossword-clue-editor h3 { font-size: 1rem; margin-bottom: 0.5rem; }
 .crossword-clues ol { margin: 0; padding: 0; list-style: none; }
-.crossword-clues li { padding-block: 0.2rem; }
+.crossword-clues li { padding-block: 0.2rem; overflow-wrap: anywhere; }
 .crossword-clue-number { font-family: var(--font-display); font-weight: 700; }
 .crossword-answer-length { color: var(--ink-soft); white-space: nowrap; }
 .crossword-solve-form { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin-top: 1rem; }
@@ -285,6 +289,20 @@ h1, h2, h3, h4 {
 .ranked:not(.top-week-grid) li:first-child { border-top: 0; padding-top: 0; }
 .scores-list li { grid-template-columns: 2.5rem minmax(0, 1fr); }
 .score-rank { font-family: var(--font-display); color: var(--ink-soft); }
+.achievement-fish { color: #c62828; font-size: 1.1em; line-height: 1; margin-left: 0.2em; }
+.word-grid.crossword-grid {
+  grid-template-columns: repeat(var(--columns), minmax(0, 1fr));
+  grid-template-rows: none; grid-auto-rows: auto;
+  width: min(100%, 39rem, calc(var(--columns) * ((39rem - 24px) / 15 + 1px) + 9px));
+  aspect-ratio: auto;
+}
+.word-grid.crossword-grid .crossword-square {
+  aspect-ratio: 1;
+  font-size: min(1.25rem, calc(26rem / var(--columns)), calc(50vw / var(--columns)));
+}
+.word-game-actions { display: flex; gap: 0.6rem; margin-top: 1rem; }
+.word-game-actions form { flex: 1 1 0; max-width: 12rem; }
+.word-game-actions .button { width: 100%; height: 100%; }
 .score-user { display: flex; justify-content: space-between; gap: 1rem; }
 .score-user strong { white-space: nowrap; }
 .score-tabs { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-bottom: 1.5rem; }
@@ -416,7 +434,7 @@ h1, h2, h3, h4 {
 .search input[type="search"] { flex: 1 1 16rem; }
 .search select { flex: 0 1 auto; }
 
-.user-list { list-style: none; margin: 0 0 2.5rem; padding: 0; display: grid; gap: 0.9rem; }
+.user-list { list-style: none; margin: 0 0 1.5rem; padding: 0; display: grid; gap: 0.9rem; }
 .user-list li { display: flex; align-items: center; gap: 0.9rem; font-family: var(--font-display); }
 .user-list a { font-weight: 600; margin-right: 0.6rem; }
 

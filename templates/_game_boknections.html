@@ -1,5 +1,5 @@
   <section class="admin-block" id="boknections" aria-labelledby="boknections-title">
-    <h2 id="boknections-title">Boknections, Wild Card (monthly)</h2>
+    <h2 id="boknections-title">Wild Card Boknections</h2>
     <p class="help">Four categories of three words, plus one wild card word that fits every category. Players get 10 attempts. Winners earn a flower by their name and a win on their profile. Changing the puzzle resets attempts and flowers.</p>
     <form method="post" action="{{ url_for('admin_toggle_boknections') }}" class="actions">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
