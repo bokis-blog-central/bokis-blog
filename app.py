@@ -174,6 +174,7 @@ CREATE TABLE IF NOT EXISTS boknections_state (
     id         INTEGER PRIMARY KEY CHECK (id = 1),
     puzzle     TEXT NOT NULL,
     version    INTEGER NOT NULL DEFAULT 1,
+    archive_id INTEGER REFERENCES boknections_archive(id) ON DELETE SET NULL,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -216,7 +217,8 @@ CREATE TABLE IF NOT EXISTS hidden_bok_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     answer TEXT NOT NULL,
     hint TEXT NOT NULL,
-    version INTEGER NOT NULL DEFAULT 1
+    version INTEGER NOT NULL DEFAULT 1,
+    archive_id INTEGER REFERENCES hidden_bok_archive(id) ON DELETE SET NULL
 );
 CREATE TABLE IF NOT EXISTS hidden_bok_progress (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -285,6 +287,12 @@ def migrate_db():
         },
         "hidden_bok_progress": {
             "cells": "TEXT",
+        },
+        "hidden_bok_state": {
+            "archive_id": "INTEGER REFERENCES hidden_bok_archive(id) ON DELETE SET NULL",
+        },
+        "boknections_state": {
+            "archive_id": "INTEGER REFERENCES boknections_archive(id) ON DELETE SET NULL",
         },
         "comments": {
             "image": "TEXT",
@@ -607,7 +615,7 @@ def boknections_enabled():
 
 def get_bokopsaraki():
     return db().execute(
-        "SELECT answer, hint, version FROM hidden_bok_state WHERE id = 1"
+        "SELECT answer, hint, version, archive_id FROM hidden_bok_state WHERE id = 1"
     ).fetchone()
 
 
@@ -2040,10 +2048,9 @@ def admin_toggle_bokopsaraki():
 @app.post("/admin/bokopsaraki")
 @admin_required
 def admin_save_bokopsaraki():
-    answer = unicodedata.normalize("NFC", " ".join(request.form.get("answer", "").split()))
-    hint = request.form.get("hint", "").strip()
-    if not answer or len(answer) > 500 or not hint or len(hint) > 10000:
-        flash("Enter an answer of up to 500 characters and a hint of up to 10000 characters.", "error")
+    answer, hint, error = validate_hidden_bok_form(request.form)
+    if error:
+        flash(error, "error")
         return redirect(url_for("admin") + "#bokopsaraki")
     db().execute("BEGIN IMMEDIATE")
     current = get_bokopsaraki()
@@ -2052,13 +2059,9 @@ def admin_save_bokopsaraki():
                      (answer, hint))
         flash("Hidden Bok puzzle saved.", "ok")
     elif (current["answer"], current["hint"]) != (answer, hint):
-        victors = [row["username"] for row in db().execute(
-            "SELECT u.username FROM hidden_bok_progress p JOIN users u ON u.id = p.user_id "
-            "WHERE p.puzzle_version = ? AND p.solved = 1", (current["version"],))]
-        db().execute("INSERT INTO hidden_bok_archive (answer, hint, victors) VALUES (?, ?, ?)",
-                     (current["answer"], current["hint"], json.dumps(victors, ensure_ascii=False)))
+        archive_current_hidden_bok(current)
         db().execute("UPDATE hidden_bok_state SET answer = ?, hint = ?, "
-                     "version = version + 1 WHERE id = 1", (answer, hint))
+                     "version = version + 1, archive_id = NULL WHERE id = 1", (answer, hint))
         db().execute("DELETE FROM hidden_bok_progress")
         flash("Hidden Bok puzzle archived and replaced; current badges were reset.", "ok")
     else:
@@ -2111,23 +2114,18 @@ def admin_save_boknections():
         flash(error, "error")
         return games_redirect("#boknections")
     serialized = json.dumps(puzzle, ensure_ascii=False, sort_keys=True)
+    db().execute("BEGIN IMMEDIATE")
     state = db().execute(
-        "SELECT puzzle, version FROM boknections_state WHERE id = 1").fetchone()
+        "SELECT puzzle, version, archive_id FROM boknections_state WHERE id = 1").fetchone()
     if state is None:
         db().execute(
             "INSERT INTO boknections_state (id, puzzle, version) VALUES (1, ?, 1)",
             (serialized,))
         flash("Boknections puzzle saved.", "ok")
     elif json.loads(state["puzzle"]) != puzzle:
-        old_puzzle = json.loads(state["puzzle"])
-        old_victors = [row["username"] for row in db().execute(
-            "SELECT u.username FROM boknections_progress p "
-            "JOIN users u ON u.id = p.user_id "
-            "WHERE p.puzzle_version = ? AND p.solved = 1",
-            (state["version"],)).fetchall()]
-        add_boknections_archive_entry(old_puzzle, old_victors)
+        archive_current_boknections(state)
         db().execute(
-            "UPDATE boknections_state SET puzzle = ?, version = version + 1, "
+            "UPDATE boknections_state SET puzzle = ?, version = version + 1, archive_id = NULL, "
             "updated_at = datetime('now') WHERE id = 1", (serialized,))
         db().execute("DELETE FROM boknections_progress")
         flash("Boknections puzzle updated; attempts and flowers were reset.", "ok")
@@ -2218,6 +2216,37 @@ def admin_archive_current_crossword():
     flash("The current Bokword was added to the archive with its solvers as "
           "original victors.", "ok")
     return redirect(url_for("admin") + "#crossword")
+
+
+@app.post("/admin/boknections/archive")
+@admin_required
+def admin_archive_current_boknections():
+    db().execute("BEGIN IMMEDIATE")
+    state = db().execute(
+        "SELECT puzzle, version, archive_id FROM boknections_state WHERE id = 1").fetchone()
+    if state is None:
+        db().rollback()
+        flash("There is no published Boknections to archive.", "error")
+    else:
+        archive_current_boknections(state)
+        db().commit()
+        flash("The current Boknections and its solvers were saved to the archive.", "ok")
+    return redirect(url_for("admin") + "#boknections")
+
+
+@app.post("/admin/hidden-bok/archive")
+@admin_required
+def admin_archive_current_hidden_bok():
+    db().execute("BEGIN IMMEDIATE")
+    state = get_bokopsaraki()
+    if state is None:
+        db().rollback()
+        flash("There is no published Hidden Bok to archive.", "error")
+    else:
+        archive_current_hidden_bok(state)
+        db().commit()
+        flash("The current Hidden Bok and its solvers were saved to the archive.", "ok")
+    return redirect(url_for("admin") + "#bokopsaraki")
 
 
 @app.post("/crossword/progress")
@@ -2562,6 +2591,52 @@ def add_boknections_archive_entry(puzzle, victors, cleared_at=None):
     return cursor.lastrowid
 
 
+def validate_hidden_bok_form(form):
+    answer = unicodedata.normalize("NFC", " ".join(form.get("answer", "").split()))
+    hint = form.get("hint", "").strip()
+    if not answer or len(answer) > 500 or not hint or len(hint) > 10000:
+        return None, None, "Enter an answer of up to 500 characters and a hint of up to 10000 characters."
+    return answer, hint, None
+
+
+def add_hidden_bok_archive_entry(answer, hint, victors, cleared_at=None):
+    cursor = db().execute(
+        "INSERT INTO hidden_bok_archive (answer, hint, victors, cleared_at) "
+        "VALUES (?, ?, ?, COALESCE(?, datetime('now')))",
+        (answer, hint, json.dumps(victors, ensure_ascii=False), cleared_at))
+    return cursor.lastrowid
+
+
+def merge_archive_victors(table, entry_id, victors):
+    row = db().execute(f"SELECT victors FROM {table} WHERE id = ?", (entry_id,)).fetchone()
+    existing = json.loads(row["victors"])
+    merged = list(dict.fromkeys(existing + victors))
+    db().execute(f"UPDATE {table} SET victors = ? WHERE id = ?",
+                 (json.dumps(merged, ensure_ascii=False), entry_id))
+
+
+def archive_current_boknections(state):
+    victors = [row["username"] for row in db().execute(
+        "SELECT u.username FROM boknections_progress p JOIN users u ON u.id = p.user_id "
+        "WHERE p.puzzle_version = ? AND p.solved = 1 ORDER BY u.username", (state["version"],))]
+    if state["archive_id"] is None:
+        entry_id = add_boknections_archive_entry(json.loads(state["puzzle"]), victors)
+        db().execute("UPDATE boknections_state SET archive_id = ? WHERE id = 1", (entry_id,))
+    else:
+        merge_archive_victors("boknections_archive", state["archive_id"], victors)
+
+
+def archive_current_hidden_bok(state):
+    victors = [row["username"] for row in db().execute(
+        "SELECT u.username FROM hidden_bok_progress p JOIN users u ON u.id = p.user_id "
+        "WHERE p.puzzle_version = ? AND p.solved = 1 ORDER BY u.username", (state["version"],))]
+    if state["archive_id"] is None:
+        entry_id = add_hidden_bok_archive_entry(state["answer"], state["hint"], victors)
+        db().execute("UPDATE hidden_bok_state SET archive_id = ? WHERE id = 1", (entry_id,))
+    else:
+        merge_archive_victors("hidden_bok_archive", state["archive_id"], victors)
+
+
 def parse_victors(text):
     names = []
     for name in re.split(r"[\r\n,]+", text or ""):
@@ -2858,13 +2933,31 @@ def admin_boknections_archive_add():
         error = "Enter a valid cleared date."
     if error:
         flash(error, "error")
-        return redirect(url_for("admin_archive"))
+        return redirect(url_for("admin_archive", add="boknections", _anchor="add-boknections"))
     add_boknections_archive_entry(
         puzzle, parse_victors(request.form.get("victors")),
         f"{cleared} 12:00:00" if cleared else None)
     db().commit()
     flash("Boknections added to the archive.", "ok")
-    return redirect(url_for("admin_archive"))
+    return redirect(url_for("admin_archive", add="boknections", _anchor="add-boknections"))
+
+
+@app.post("/admin/archive/hidden-bok/add")
+@admin_required
+def admin_hidden_bok_archive_add():
+    answer, hint, error = validate_hidden_bok_form(request.form)
+    cleared = valid_date(request.form.get("cleared_date", ""))
+    if not error and request.form.get("cleared_date") and not cleared:
+        error = "Enter a valid cleared date."
+    if error:
+        flash(error, "error")
+        return redirect(url_for("admin_archive", add="hidden-bok", _anchor="add-hidden-bok"))
+    add_hidden_bok_archive_entry(
+        answer, hint, parse_victors(request.form.get("victors")),
+        f"{cleared} 12:00:00" if cleared else None)
+    db().commit()
+    flash("Hidden Bok added to the archive.", "ok")
+    return redirect(url_for("admin_archive", add="hidden-bok", _anchor="add-hidden-bok"))
 
 
 @app.post("/admin/archive/boknections/<int:entry_id>/update")
@@ -2888,6 +2981,7 @@ def admin_boknections_archive_update(entry_id):
     if json.loads(row["puzzle"]) != puzzle:
         db().execute("UPDATE archive_progress SET state = '{}' WHERE game = 'boknections' AND entry_id = ?",
                      (entry_id,))
+        db().execute("UPDATE boknections_state SET archive_id = NULL WHERE archive_id = ?", (entry_id,))
     db().execute(
         "UPDATE boknections_archive SET puzzle = ?, victors = ?, cleared_at = ? "
         "WHERE id = ?",

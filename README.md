@@ -58,7 +58,10 @@ A small multi-user blog built with Flask and SQLite.
   are preserved with their original victors. Logged-in players' archive inputs and
   victories are saved to their accounts. Resetting an archive puzzle clears its
   current attempt but keeps its archive victory; archive wins do not affect main
-  scores or badges. Admins can edit Bokword and Boknections archive entries.
+  scores or badges. Admins can add current puzzles and manually add past puzzles
+  for all three games, and edit Bokword and Boknections archive entries. Adding
+  a current Boknections or Hidden Bok preserves its progress; later solvers are
+  added to the same archive entry when it is added again or replaced.
 
 ## Setup
 

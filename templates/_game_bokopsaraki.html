@@ -14,4 +14,12 @@
     <textarea id="hidden-hint" name="hint" rows="8" maxlength="10000" required>{{ bokopsaraki.hint if bokopsaraki else '' }}</textarea>
     <button class="button" type="submit">Save puzzle</button>
   </form>
+  {% if bokopsaraki %}
+    <form method="post" action="{{ url_for('admin_archive_current_hidden_bok') }}" class="actions">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="button secondary" type="submit">Add current Hidden Bok to archive</button>
+    </form>
+    <p class="help">Adding saves the published puzzle and its solvers without resetting progress.</p>
+  {% endif %}
+  <p><a class="button secondary" href="{{ url_for('admin_archive', add='hidden-bok', _anchor='add-hidden-bok') }}">Add a past Hidden Bok to the archive</a></p>
 </section>

@@ -1,11 +1,12 @@
 {% extends "base.html" %}
 {% from "_admin_macros.html" import crossword_fields, post_picker %}
-{% block title %}Bokword archive admin | {% endblock %}
+{% block title %}Game archive admin | {% endblock %}
 {% block content %}
 <div class="wrap page narrow">
   <p><a href="{{ url_for('admin' if g.user.is_admin else 'guest_panel') }}#crossword">&larr; {{ 'Admin' if g.user.is_admin else 'Guest' }}</a></p>
-  <h1 class="page-title">Bokword archive</h1>
-  <p class="help">Cleared Bokwords are added here automatically, newest first. Use the arrows to arrange the order shown to players by default.</p>
+  <h1 class="page-title">Game archives</h1>
+  <h2 class="page-title archive-admin-heading">Bokword archive</h2>
+  <p class="help">Manage archived Bokwords and add past puzzles manually.</p>
 
   {% for e in entries %}
     <details class="admin-block archive-admin-entry" id="entry-{{ e.id }}">
@@ -98,7 +99,7 @@
     </details>
   {% else %}<p class="empty">The Boknections archive is empty.</p>{% endfor %}
 
-  <details class="admin-block archive-admin-entry">
+  <details class="admin-block archive-admin-entry" id="add-boknections" {% if request.args.get('add') == 'boknections' %}open{% endif %}>
     <summary>Add a Boknections manually</summary>
     <div class="archive-admin-content">
       <form method="post" action="{{ url_for('admin_boknections_archive_add') }}" class="stack">
@@ -110,6 +111,34 @@
         <div class="field-group"><label for="bokn-wild-new">Wild card</label><input id="bokn-wild-new" name="wild" type="text" maxlength="40" required></div>
         <div class="field-group"><label for="bokn-victors-new">Original victors</label><textarea id="bokn-victors-new" name="victors" rows="4" maxlength="20000"></textarea></div>
         <div class="actions"><button class="button" type="submit">Add to archive</button></div>
+      </form>
+    </div>
+  </details>
+
+  <h2 class="page-title archive-admin-heading">Hidden Bok archive</h2>
+  <p class="help">Hidden Bok puzzles are archived when replaced. <a href="{{ url_for('hidden_bok_archive') }}">View the archive</a>.</p>
+  <details class="admin-block archive-admin-entry" id="add-hidden-bok" {% if request.args.get('add') == 'hidden-bok' %}open{% endif %}>
+    <summary>Add a Hidden Bok manually</summary>
+    <div class="archive-admin-content">
+      <form method="post" action="{{ url_for('admin_hidden_bok_archive_add') }}" class="stack">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="field-group">
+          <label for="hidden-archive-answer">Answer</label>
+          <input id="hidden-archive-answer" name="answer" type="text" maxlength="500" required>
+        </div>
+        <div class="field-group">
+          <label for="hidden-archive-hint">Hint</label>
+          <textarea id="hidden-archive-hint" name="hint" rows="8" maxlength="10000" required></textarea>
+        </div>
+        <div class="field-group">
+          <label for="hidden-archive-date">Date cleared (defaults to today)</label>
+          <input id="hidden-archive-date" name="cleared_date" type="date">
+        </div>
+        <div class="field-group">
+          <label for="hidden-archive-victors">Original victors (one username per line)</label>
+          <textarea id="hidden-archive-victors" name="victors" rows="4" maxlength="20000"></textarea>
+        </div>
+        <button class="button" type="submit">Add to archive</button>
       </form>
     </div>
   </details>

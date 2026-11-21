@@ -31,4 +31,14 @@
       </div>
       <div class="actions"><button class="button" type="submit">{{ 'Save puzzle' if boknections_puzzle else 'Publish puzzle' }}</button></div>
     </form>
+    {% if g.user.is_admin %}
+      {% if boknections_puzzle %}
+        <form method="post" action="{{ url_for('admin_archive_current_boknections') }}" class="actions">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="button secondary" type="submit">Add current Boknections to archive</button>
+        </form>
+        <p class="help">Adding saves the published puzzle and its solvers without resetting progress.</p>
+      {% endif %}
+      <p><a class="button secondary" href="{{ url_for('admin_archive', add='boknections', _anchor='add-boknections') }}">Add a past Boknections to the archive</a></p>
+    {% endif %}
   </section>

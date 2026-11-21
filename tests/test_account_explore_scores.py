@@ -143,6 +143,153 @@ class AccountExploreScoresTests(unittest.TestCase):
         self.assertEqual(self.execute("SELECT COUNT(*) FROM boknections_archive"), [(1,)])
         self.assertEqual(self.execute("SELECT version FROM boknections_state"), [(2,)])
 
+    def test_manual_archive_buttons_and_boknections_entry(self):
+        page = self.client.get("/admin").get_data(as_text=True)
+        self.assertIn("Add a past Boknections to the archive", page)
+        self.assertIn("Add a past Hidden Bok to the archive", page)
+        page = self.client.get("/admin/archive?add=boknections").get_data(as_text=True)
+        self.assertRegex(page, r'id="add-boknections"\s+open')
+        form = {
+            f"cat{i}_{field}": value
+            for i in range(1, 5)
+            for field, value in [
+                ("title", f"Category {i}"),
+                *[(f"word{j}", f"word{i}{j}") for j in range(1, 4)],
+            ]
+        }
+        form.update(wild="wildcard", cleared_date="2024-02-29", victors="Winner\nOther")
+        response = self.post(self.client, "/admin/archive/boknections/add", **form)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("add=boknections", response.location)
+        puzzle, victors, cleared_at = self.execute(
+            "SELECT puzzle, victors, cleared_at FROM boknections_archive")[0]
+        self.assertEqual(json.loads(puzzle)["wild"], "wildcard")
+        self.assertEqual(json.loads(victors), ["Winner", "Other"])
+        self.assertEqual(cleared_at, "2024-02-29 12:00:00")
+        self.assertFalse(self.execute("SELECT * FROM boknections_state"))
+        self.assertIn("Boknections cleared", self.client.get("/boknections-archive").get_data(as_text=True))
+
+    def test_quick_archive_current_games_and_update_victors_on_replacement(self):
+        winner = self.add_user("Winner", connections=3)
+        later = self.add_user("Later")
+        player = self.blog.app.test_client()
+        self.login(player, later)
+        for path in ("/admin/boknections/archive", "/admin/hidden-bok/archive"):
+            self.assertEqual(self.post(player, path).status_code, 403)
+            response = self.post(self.client, path)
+            self.assertIn("no published", self.client.get(response.location).get_data(as_text=True))
+        form = {
+            f"cat{i}_{field}": value
+            for i in range(1, 5)
+            for field, value in [
+                ("title", f"Category {i}"),
+                *[(f"word{j}", f"word{i}{j}") for j in range(1, 4)],
+            ]
+        }
+        form["wild"] = "wildcard"
+        self.post(self.client, "/admin/boknections", **form)
+        self.post(self.client, "/admin/bokopsaraki", answer="Γάτα 🐟", hint="A clue")
+        page = self.client.get("/admin").get_data(as_text=True)
+        self.assertIn("Add current Boknections to archive", page)
+        self.assertIn("Add current Hidden Bok to archive", page)
+        self.execute("INSERT INTO boknections_progress (user_id, puzzle_version, solved) VALUES (?, 1, 1)",
+                     (winner,))
+        self.execute("INSERT INTO hidden_bok_progress (user_id, puzzle_version, answer, solved) VALUES (?, 1, ?, 1)",
+                     (winner, "Γάτα 🐟"))
+        for path in ("/admin/boknections/archive", "/admin/hidden-bok/archive"):
+            self.assertEqual(self.post(self.client, path).status_code, 302)
+            self.assertEqual(self.post(self.client, path).status_code, 302)
+        self.assertEqual(self.execute("SELECT COUNT(*) FROM boknections_archive"), [(1,)])
+        self.assertEqual(self.execute("SELECT COUNT(*) FROM hidden_bok_archive"), [(1,)])
+        self.assertEqual(json.loads(self.execute("SELECT victors FROM boknections_archive")[0][0]), ["Winner"])
+        self.assertEqual(json.loads(self.execute("SELECT victors FROM hidden_bok_archive")[0][0]), ["Winner"])
+        self.execute("INSERT INTO boknections_progress (user_id, puzzle_version, solved) VALUES (?, 1, 1)",
+                     (later,))
+        self.execute("INSERT INTO hidden_bok_progress (user_id, puzzle_version, answer, solved) VALUES (?, 1, ?, 1)",
+                     (later, "Γάτα 🐟"))
+        self.execute("INSERT INTO archive_progress (user_id, game, entry_id, state, won) VALUES (?, 'hidden-bok', 1, '{}', 1)",
+                     (later,))
+        form["wild"] = "newwildcard"
+        self.post(self.client, "/admin/boknections", **form)
+        self.post(self.client, "/admin/bokopsaraki", answer="Next", hint="Next clue")
+        for table in ("boknections_archive", "hidden_bok_archive"):
+            rows = self.execute(f"SELECT victors FROM {table}")
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(set(json.loads(rows[0][0])), {"Winner", "Later"})
+        self.assertEqual(self.execute("SELECT won FROM archive_progress WHERE user_id = ?", (later,)), [(1,)])
+        self.assertEqual(self.execute("SELECT boknections_victories FROM users WHERE id = ?", (winner,)), [(3,)])
+        self.assertIsNone(self.execute("SELECT archive_id FROM boknections_state")[0][0])
+        self.assertIsNone(self.execute("SELECT archive_id FROM hidden_bok_state")[0][0])
+
+    def test_quick_archive_boknections_after_archive_edit_or_deletion(self):
+        form = {
+            f"cat{i}_{field}": value
+            for i in range(1, 5)
+            for field, value in [
+                ("title", f"Category {i}"),
+                *[(f"word{j}", f"word{i}{j}") for j in range(1, 4)],
+            ]
+        }
+        form["wild"] = "wildcard"
+        self.post(self.client, "/admin/boknections", **form)
+        self.post(self.client, "/admin/boknections/archive")
+        edited = {**form, "wild": "other", "cleared_date": "2024-01-01"}
+        self.post(self.client, "/admin/archive/boknections/1/update", **edited)
+        self.assertIsNone(self.execute("SELECT archive_id FROM boknections_state")[0][0])
+        self.post(self.client, "/admin/boknections/archive")
+        self.assertEqual(self.execute("SELECT COUNT(*) FROM boknections_archive"), [(2,)])
+        linked_id = self.execute("SELECT archive_id FROM boknections_state")[0][0]
+        self.post(self.client, f"/admin/archive/boknections/{linked_id}/delete")
+        self.assertIsNone(self.execute("SELECT archive_id FROM boknections_state")[0][0])
+        self.post(self.client, "/admin/boknections/archive")
+        self.assertEqual(self.execute("SELECT COUNT(*) FROM boknections_archive"), [(2,)])
+
+    def test_quick_archive_migration_preserves_existing_current_puzzles(self):
+        self.post(self.client, "/admin/bokopsaraki", answer="Existing", hint="A clue")
+        form = {
+            f"cat{i}_{field}": value
+            for i in range(1, 5)
+            for field, value in [
+                ("title", f"Category {i}"),
+                *[(f"word{j}", f"word{i}{j}") for j in range(1, 4)],
+            ]
+        }
+        form["wild"] = "wildcard"
+        self.post(self.client, "/admin/boknections", **form)
+        self.execute("ALTER TABLE boknections_state DROP COLUMN archive_id")
+        self.execute("ALTER TABLE hidden_bok_state DROP COLUMN archive_id")
+        self.blog.migrate_db()
+        self.post(self.client, "/admin/boknections/archive")
+        self.post(self.client, "/admin/hidden-bok/archive")
+        self.assertEqual(self.execute("SELECT answer FROM hidden_bok_archive"), [("Existing",)])
+        self.assertEqual(json.loads(self.execute("SELECT puzzle FROM boknections_archive")[0][0])["wild"],
+                         "wildcard")
+
+    def test_manual_hidden_bok_archive_validation_and_permissions(self):
+        self.post(self.client, "/admin/bokopsaraki", answer="Current", hint="Current hint")
+        page = self.client.get("/admin/archive?add=hidden-bok").get_data(as_text=True)
+        self.assertRegex(page, r'id="add-hidden-bok"\s+open')
+        player = self.add_user("Player")
+        client = self.blog.app.test_client()
+        self.login(client, player)
+        payload = {"answer": "Γάτα 👩‍👩‍👧‍👦 42!", "hint": "First paragraph.\n\nSecond paragraph.",
+                   "cleared_date": "2023-02-29", "victors": "Player\nFormer"}
+        self.assertEqual(self.post(client, "/admin/archive/hidden-bok/add", **payload).status_code, 403)
+        response = self.post(self.client, "/admin/archive/hidden-bok/add", **payload)
+        self.assertIn("Enter a valid cleared date.", self.client.get(response.location).get_data(as_text=True))
+        self.assertFalse(self.execute("SELECT * FROM hidden_bok_archive"))
+        payload["cleared_date"] = "2024-02-29"
+        self.assertEqual(self.post(self.client, "/admin/archive/hidden-bok/add", **payload).status_code, 302)
+        answer, hint, victors, cleared = self.execute(
+            "SELECT answer, hint, victors, cleared_at FROM hidden_bok_archive")[0]
+        self.assertEqual((answer, hint, json.loads(victors), cleared),
+                         (payload["answer"], payload["hint"], ["Player", "Former"], "2024-02-29 12:00:00"))
+        self.assertEqual(self.execute("SELECT answer FROM hidden_bok_state"), [("Current",)])
+        page = client.get("/hidden-bok-archive/1").get_data(as_text=True)
+        self.assertIn(payload["hint"], page)
+        self.assertNotIn(payload["answer"], page)
+        self.assertEqual(page.count("data-hidden-square"), 8)
+
     def test_explore_pages_users_independently_and_preserves_filters(self):
         for i in range(25):
             user_id = self.add_user(f"Player{i:02}")
