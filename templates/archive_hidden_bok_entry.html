@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Hidden Bok archive | {% endblock %}
+{% block content %}
+<div class="wrap page narrow">
+  <p><a href="{{ url_for('hidden_bok_archive') }}">&larr; Hidden Bok archive</a></p>
+  <h1 class="page-title">Hidden Bok cleared {{ entry.cleared_at|date }}</h1>
+  <p>Original victors: {{ victors|join(', ') if victors else 'none' }}</p>
+  {% if archive_won %}<p role="status">Archive victory earned.</p>{% endif %}
+  {% if g.user %}{% set archive_game = 'hidden-bok' %}{% include "_archive_reset.html" %}{% endif %}
+  {% set hint = entry.hint %}
+  {% set answer = state.get('answer', '') %}
+  {% set solved = state.get('solved', false) %}
+  {% set check_url = url_for('check_hidden_bok_archive', entry_id=entry.id) %}
+  {% set progress_url = url_for('save_archive_progress', game='hidden-bok', entry_id=entry.id) %}
+  {% include "_hidden_bok_board.html" %}
+</div>
+{% endblock %}

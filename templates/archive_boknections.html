@@ -3,10 +3,11 @@
 {% block content %}
 <div class="wrap page narrow">
   <h1 class="page-title">Boknections archive</h1>
-  <p class="muted">Every completed Boknections puzzle. Pick one to review its categories and original victors.</p>
+  <p class="muted">Play past Boknections puzzles and see their original victors.</p>
   <nav class="archive-tabs" aria-label="Game archives">
     <a class="button secondary" href="{{ url_for('bokword_archive') }}">Bokword</a>
     <a class="button secondary" href="{{ url_for('boknections_archive') }}">Boknections</a>
+    <a class="button secondary" href="{{ url_for('hidden_bok_archive') }}">Hidden Bok</a>
   </nav>
   {% if entries %}
     <ol class="post-list">

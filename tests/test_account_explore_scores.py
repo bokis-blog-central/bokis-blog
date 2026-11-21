@@ -342,138 +342,147 @@ class AccountExploreScoresTests(unittest.TestCase):
         by_key = {entry["key"]: entry for entry in view}
         self.assertEqual(by_key["A-0-0"]["lengths"], "4")
 
-    def test_bokopsaraki_game_and_score_lifecycle(self):
+    def test_hidden_bok_unicode_and_archive_lifecycle(self):
         player = self.add_user("Player")
         client = self.blog.app.test_client()
         self.login(client, player)
-        self.assertNotIn("ΜΠΟΚΟΨΑΡΑΚΙΑ", client.get("/").get_data(as_text=True))
-        self.assertEqual(self.post(client, "/admin/bokopsaraki", start_word="γάτα", end_word="καλά").status_code, 403)
-        self.post(self.client, "/admin/bokopsaraki", start_word="γάτα", end_word="καλά")
+        answer = "Γάτα A1! 👩‍👩‍👧‍👦"
+        hint = "First paragraph.\n\n" + "Long hint. " * 100
+        self.assertEqual(self.post(client, "/admin/bokopsaraki", answer=answer, hint=hint).status_code, 403)
+        self.post(self.client, "/admin/bokopsaraki", answer=answer, hint=hint)
         self.post(self.client, "/admin/bokopsaraki/toggle", enabled="1")
-        self.assertIn("ΜΠΟΚΟΨΑΡΑΚΙΑ", client.get("/").get_data(as_text=True))
         page = client.get("/").get_data(as_text=True)
-        self.assertIn('name="word_letter"', page)
-        self.assertIn("Destination: <strong>ΚΑΛΑ</strong>", page)
-        self.assertIn('aria-label="Γ">Γ</span>', page)
-        cells = re.findall(r'<input[^>]*name="word_letter"[^>]*>', page)
-        self.assertEqual(len(cells), 4)
-        self.assertTrue(all('value=' not in cell for cell in cells))
-        self.assertIn("Enter word", page)
-        self.assertIn("Restart", page)
-        self.assertIn("γαλα", self.blog.greek_dictionary())
-        self.post(client, "/bokopsaraki/play", version="1", action="guess", word="ΓΆΛΑ")
-        self.assertEqual(self.execute("SELECT current_word FROM bokopsaraki_progress WHERE user_id = ?", (player,)),
-                         [("γαλα",)])
+        self.assertNotIn(answer, page)
+        self.assertIn(hint.strip(), page)
+        self.assertEqual(page.count("data-hidden-square"), 8)
+        self.post(client, "/bokopsaraki/play", version="1", action="save", answer="Γά")
         page = client.get("/").get_data(as_text=True)
-        cells = re.findall(r'<input[^>]*name="word_letter"[^>]*>', page)
-        self.assertEqual(len(cells), 4)
-        self.assertTrue(all('value=' not in cell for cell in cells))
-        self.assertEqual(page.count('aria-label="Γ">Γ</span>'), 2)
-        self.post(client, "/bokopsaraki/play", version="1", action="guess", word="γαλο")
-        self.post(client, "/bokopsaraki/play", version="1", action="reset")
-        self.assertEqual(self.execute("SELECT current_word FROM bokopsaraki_progress WHERE user_id = ?", (player,)),
-                         [("γατα",)])
-        page = client.get("/").get_data(as_text=True)
-        self.assertEqual(page.count('aria-label="Γ">Γ</span>'), 1)
-        self.assertEqual(len(re.findall(r'<input[^>]*name="word_letter"[^>]*>', page)), 4)
-        self.post(client, "/bokopsaraki/play", version="1", action="guess", word="γαλα")
-        self.post(client, "/bokopsaraki/play", version="1", action="guess", word="καλα")
-        self.assertEqual(self.execute("SELECT solved FROM bokopsaraki_progress WHERE user_id = ?", (player,)), [(1,)])
-        self.assertEqual(self.execute(
-            "SELECT word FROM bokopsaraki_history WHERE user_id = ? ORDER BY id", (player,)),
-            [("γαλα",), ("καλα",)])
-        self.assertIn("red 🟘", client.get("/").get_data(as_text=True))
-        self.assertIn(">🟘&#xFE0E;</span>", client.get("/u/Player").get_data(as_text=True))
+        self.assertIn('value="Γ"', page)
+        self.assertIn('value="ά"', page)
+        result = self.post(client, "/bokopsaraki/play", version="1", action="check",
+                           answer="γάτα  a1! 👩‍👩‍👧‍👦")
+        self.assertTrue(result.json["solved"])
+        self.post(client, "/bokopsaraki/play", version="1", action="check", answer=answer)
         self.assertEqual(self.execute("SELECT bokopsaraki_victories FROM users WHERE id = ?", (player,)), [(1,)])
-        self.assertIn("Solved the current ΜΠΟΚΟΨΑΡΑΚΙΑ", client.get("/u/Player").get_data(as_text=True))
-        self.assertIn("Player", client.get("/scores?game=bokopsaraki").get_data(as_text=True))
-        self.post(client, "/bokopsaraki/play", version="1", action="reset")
-        self.assertFalse(self.execute("SELECT * FROM bokopsaraki_history WHERE user_id = ?", (player,)))
-        self.post(client, "/bokopsaraki/play", version="1", action="guess", word="γαλα")
-        self.post(client, "/bokopsaraki/play", version="1", action="guess", word="καλα")
-        self.assertEqual(self.execute("SELECT bokopsaraki_victories FROM users WHERE id = ?", (player,)), [(1,)])
-        self.post(self.client, "/admin/bokopsaraki", start_word="γάτα", end_word="καβά")
-        self.assertNotIn("Solved the current ΜΠΟΚΟΨΑΡΑΚΙΑ", client.get("/u/Player").get_data(as_text=True))
-        self.post(client, "/bokopsaraki/play", version="1", action="guess", word="γαλα")
-        self.assertFalse(self.execute("SELECT * FROM bokopsaraki_progress WHERE user_id = ?", (player,)))
-        self.assertFalse(self.execute("SELECT * FROM bokopsaraki_history WHERE user_id = ?", (player,)))
+        self.assertIn("Solved the current Hidden Bok", client.get("/u/Player").get_data(as_text=True))
+        self.post(self.client, "/admin/bokopsaraki", answer="Next", hint="Next hint")
+        self.assertEqual(self.post(client, "/bokopsaraki/play", version="1", action="save", answer="old").status_code, 409)
+        self.assertEqual(json.loads(self.execute("SELECT victors FROM hidden_bok_archive")[0][0]), ["Player"])
+        page = client.get("/hidden-bok-archive/1").get_data(as_text=True)
+        self.assertNotIn(answer, page)
+        self.post(client, "/archive/hidden-bok/1/progress", state=json.dumps("Γά"))
+        self.assertIn('value="Γ"', client.get("/hidden-bok-archive/1").get_data(as_text=True))
+        self.assertTrue(self.post(client, "/hidden-bok-archive/1/check", answer=answer).json["solved"])
+        self.post(client, "/archive/hidden-bok/1/reset")
+        page = client.get("/hidden-bok-archive/1").get_data(as_text=True)
+        self.assertIn("Archive victory earned", page)
+        self.assertIn('value=""', page)
         self.assertEqual(self.execute("SELECT bokopsaraki_victories FROM users WHERE id = ?", (player,)), [(1,)])
 
-    def test_bokopsaraki_custom_word_and_invalid_moves(self):
+    def test_hidden_bok_cells_preserve_gaps_and_unicode_in_current_and_archive(self):
         player = self.add_user("Player")
         client = self.blog.app.test_client()
         self.login(client, player)
-        self.post(self.client, "/admin/bokopsaraki", start_word="γατα", end_word="καβα")
+        answer = "A👩‍👩‍👧‍👦 Γ!"
+        self.post(self.client, "/admin/bokopsaraki", answer=answer, hint="A clue")
         self.post(self.client, "/admin/bokopsaraki/toggle", enabled="1")
-        self.post(client, "/bokopsaraki/play", version="1", action="guess", word="abc")
-        self.post(client, "/bokopsaraki/play", version="1", action="guess", word="καβα")
-        self.assertFalse(self.execute("SELECT * FROM bokopsaraki_progress WHERE user_id = ?", (player,)))
-        self.post(self.client, "/admin/bokopsaraki/words", action="add", word="ΓΆΒΑ")
-        self.post(client, "/bokopsaraki/play", version="1", action="guess", word="γαβα")
-        self.assertEqual(self.execute("SELECT current_word FROM bokopsaraki_progress WHERE user_id = ?", (player,)),
-                         [("γαβα",)])
-        self.post(client, "/bokopsaraki/play", version="1", action="guess", word="καβα")
-        self.assertEqual(self.execute("SELECT solved FROM bokopsaraki_progress WHERE user_id = ?", (player,)), [(1,)])
-        self.post(self.client, "/admin/bokopsaraki/words", action="remove", word="γαβα")
-        self.assertFalse(self.execute("SELECT word FROM bokopsaraki_words"))
-
-    def test_bokopsaraki_unknown_words_hidden_game_and_score_editing(self):
-        player = self.add_user("Player")
-        client = self.blog.app.test_client()
-        self.login(client, player)
-        self.post(self.client, "/admin/bokopsaraki", start_word="αααααααα", end_word="ββαααααα")
-        self.post(self.client, "/admin/bokopsaraki/toggle", enabled="1")
-        self.assertNotIn("βααααααα", self.blog.greek_dictionary())
-        response = self.post(client, "/bokopsaraki/play", version="1", action="guess", word="βααααααα")
-        self.assertIn("not in the Greek wordlist", client.get(response.location).get_data(as_text=True))
-        self.assertFalse(self.execute("SELECT * FROM bokopsaraki_progress WHERE user_id = ?", (player,)))
-        self.post(self.client, "/admin/bokopsaraki/words", action="add", word="βααααααα")
-        self.post(self.client, "/admin/bokopsaraki/toggle", enabled="0")
-        self.post(client, "/bokopsaraki/play", version="1", action="guess", word="βααααααα")
-        self.assertFalse(self.execute("SELECT * FROM bokopsaraki_progress WHERE user_id = ?", (player,)))
-        self.post(self.client, "/admin/scores", user_id=str(player), bokword_victories="1",
-                  boknections_victories="2", bokopsaraki_victories="3")
-        self.assertEqual(self.execute(
-            "SELECT bokword_victories, boknections_victories, bokopsaraki_victories FROM users WHERE id = ?",
-            (player,)), [(1, 2, 3)])
-        self.assertIn("3 victories", client.get("/scores?game=bokopsaraki").get_data(as_text=True))
-
-    def test_letter_cell_submission_and_legacy_progress(self):
-        player = self.add_user("Player")
-        client = self.blog.app.test_client()
-        self.login(client, player)
-        self.post(self.client, "/admin/bokopsaraki",
-                  start_word_letter=["γ", "ά", "τ", "α"], end_word_letter=["κ", "α", "λ", "ά"])
-        self.post(self.client, "/admin/bokopsaraki/toggle", enabled="1")
-        self.execute("INSERT INTO bokopsaraki_progress (user_id, puzzle_version, current_word) VALUES (?, 1, ?)",
-                     (player, "γαλα"))
+        cells = [["", "👩‍👩‍👧‍👦"], ["Γ", ""]]
+        self.assertEqual(self.post(client, "/bokopsaraki/play", version="1", action="save",
+                                   cells=json.dumps(cells)).status_code, 200)
         page = client.get("/").get_data(as_text=True)
-        self.assertEqual(page.count('name="word_letter"'), 4)
-        self.assertEqual(page.count('class="crossword-square" aria-label='), 8)
-        self.post(client, "/bokopsaraki/play", version="1", action="guess",
-                  word_letter=["κ", "α", "", "α"])
-        self.assertFalse(self.execute("SELECT * FROM bokopsaraki_history WHERE user_id = ?", (player,)))
-        self.post(client, "/bokopsaraki/play", version="1", action="guess",
-                  word_letter=["κ", "α", "λ", "ά"])
-        self.assertEqual(self.execute("SELECT word FROM bokopsaraki_history WHERE user_id = ? ORDER BY id", (player,)),
-                         [("γαλα",), ("καλα",)])
-        self.post(self.client, "/admin/bokopsaraki/words", action="add",
-                  word_letter=["γ", "ά", "β", "α"])
-        self.assertEqual(self.execute("SELECT word FROM bokopsaraki_words"), [("γαβα",)])
-        admin = self.client.get("/admin").get_data(as_text=True)
-        self.assertEqual(admin.count('name="start_word_letter"'), 4)
-        self.assertEqual(admin.count('name="end_word_letter"'), 4)
-        self.assertIn('name="start_word_letter" type="text" maxlength="1" value="Γ"', admin)
-        self.assertIn("<li>ΓΑΒΑ", admin)
+        fields = re.findall(r'<input type="text" value="([^"]*)"[^>]*data-hidden-square', page)
+        self.assertEqual(fields, ["", "👩‍👩‍👧‍👦", "Γ", ""])
+        self.assertNotIn('name="answer"', page)
+        self.assertFalse(self.post(client, "/bokopsaraki/play", version="1", action="check",
+                                   cells=json.dumps(cells)).json["solved"])
+        self.assertEqual(self.post(client, "/bokopsaraki/play", version="1", action="save",
+                                   cells=json.dumps([["AB", ""], ["", ""]])).status_code, 400)
+        self.post(self.client, "/admin/bokopsaraki", answer="Next", hint="Next clue")
+        self.assertEqual(self.post(client, "/archive/hidden-bok/1/progress",
+                                   state=json.dumps(cells)).status_code, 200)
+        page = client.get("/hidden-bok-archive/1").get_data(as_text=True)
+        self.assertEqual(re.findall(r'<input type="text" value="([^"]*)"[^>]*data-hidden-square', page),
+                         ["", "👩‍👩‍👧‍👦", "Γ", ""])
+        solved = [["A", "👩‍👩‍👧‍👦"], ["Γ", "!"]]
+        self.assertTrue(self.post(client, "/hidden-bok-archive/1/check", cells=json.dumps(solved)).json["solved"])
+        self.post(client, "/archive/hidden-bok/1/reset")
+        page = client.get("/hidden-bok-archive/1").get_data(as_text=True)
+        self.assertIn("Archive victory earned", page)
+        self.assertEqual(re.findall(r'<input type="text" value="([^"]*)"[^>]*data-hidden-square', page),
+                         ["", "", "", ""])
+
+    def test_hidden_bok_cell_migration_preserves_existing_progress(self):
+        self.post(self.client, "/admin/bokopsaraki", answer="AB", hint="A clue")
+        self.post(self.client, "/admin/bokopsaraki/toggle", enabled="1")
+        self.execute("ALTER TABLE hidden_bok_progress DROP COLUMN cells")
+        self.execute("INSERT INTO hidden_bok_progress (user_id, puzzle_version, answer) VALUES (?, 1, 'A')",
+                     (self.admin_id,))
+        self.blog.migrate_db()
+        page = self.client.get("/").get_data(as_text=True)
+        self.assertEqual(re.findall(r'<input type="text" value="([^"]*)"[^>]*data-hidden-square', page),
+                         ["A", ""])
+
+    def test_archive_progress_and_wins_survive_reset_without_affecting_scores(self):
+        player = self.add_user("Player")
+        client = self.blog.app.test_client()
+        self.login(client, player)
+        solution = "AB" + "#" * 223
+        self.execute("INSERT INTO bokword_archive (solution, clues) VALUES (?, ?)",
+                     (solution, json.dumps({"A-0-0": "A clue"})))
+        self.post(client, "/archive/bokword/1/progress", answers=json.dumps({"0": "A"}))
+        page = client.get("/bokword-archive/1").get_data(as_text=True)
+        self.assertIn('data-saved-answers=', page)
+        self.assertIn('"0": "A"', page)
+        self.assertTrue(self.post(client, "/bokword-archive/1/check", guess=solution).json["solved"])
+        self.assertIn("Archive victory earned", client.get("/bokword-archive/1").get_data(as_text=True))
+        self.post(client, "/archive/bokword/1/reset")
+        page = client.get("/bokword-archive/1").get_data(as_text=True)
+        self.assertIn("Archive victory earned", page)
+        self.assertIn('data-crossword-cell="0"', page)
+
+        puzzle = {"categories": [{"title": f"Secret {i}", "words": [f"w{i}{j}" for j in range(3)]}
+                                 for i in range(4)], "wild": "wild"}
+        self.execute("INSERT INTO boknections_archive (puzzle) VALUES (?)", (json.dumps(puzzle),))
+        page = client.get("/boknections-archive/1").get_data(as_text=True)
+        self.assertNotIn("Secret 0", page)
+        placement = {"groups": [["w00", None, "w02"]], "wild": None}
+        self.post(client, "/archive/boknections/1/progress", state=json.dumps(placement))
+        self.assertIn("w02", client.get("/boknections-archive/1").get_data(as_text=True))
+        check = {"groups": [c["words"] for c in puzzle["categories"]], "wild": "wild"}
+        self.assertTrue(self.post(client, "/boknections-archive/1/check", placement=json.dumps(check)).json["solved"])
+        self.post(client, "/archive/boknections/1/reset")
+        page = client.get("/boknections-archive/1").get_data(as_text=True)
+        self.assertIn("Archive victory earned", page)
+        self.assertNotIn("Secret 0", page)
+        self.assertEqual(self.execute("SELECT bokword_victories, boknections_victories FROM users WHERE id = ?",
+                                      (player,)), [(0, 0)])
+        self.assertEqual(self.execute("SELECT COUNT(*) FROM archive_progress WHERE user_id = ? AND won = 1",
+                                      (player,)), [(2,)])
+
+    def test_boknections_archive_keeps_unfinished_slots_after_a_check(self):
+        player = self.add_user("Player")
+        client = self.blog.app.test_client()
+        self.login(client, player)
+        puzzle = {"categories": [{"title": f"Group {i}", "words": [f"w{i}{j}" for j in range(3)]}
+                                 for i in range(4)], "wild": "wild"}
+        self.execute("INSERT INTO boknections_archive (puzzle) VALUES (?)", (json.dumps(puzzle),))
+        placement = {"groups": [puzzle["categories"][0]["words"], [None, None, None],
+                                [None, "w11", None], [None, None, None]], "wild": None}
+        self.post(client, "/archive/boknections/1/progress", state=json.dumps(placement))
+        result = self.post(client, "/boknections-archive/1/check",
+                           placement=json.dumps({"groups": [puzzle["categories"][0]["words"]], "wild": None}))
+        self.assertEqual(result.json["correct"], 1)
+        state = json.loads(self.execute("SELECT state FROM archive_progress WHERE user_id = ?", (player,))[0][0])
+        self.assertEqual(state["placement"]["groups"], placement["groups"][1:])
+        self.assertEqual(state["attempts_used"], 1)
 
     def test_home_game_order_with_both_games_enabled(self):
-        self.post(self.client, "/admin/bokopsaraki", start_word="γάτα", end_word="καλά")
+        self.post(self.client, "/admin/bokopsaraki", answer="γάτα", hint="A cat")
         self.post(self.client, "/admin/bokopsaraki/toggle", enabled="1")
         self.post(self.client, "/admin/boknections/toggle", enabled="1")
         page = self.client.get("/").get_data(as_text=True)
         self.assertIn('>Wild Card Boknections</h2>', page)
-        self.assertIn('>ΜΠΟΚΟΨΑΡΑΚΙΑ</h2>', page)
-        self.assertIn("Reach the destination word by changing one letter at a time. Every step must be a real word, some slang included. All capitals, all accents are ignored. Solve for a red 🟘 by your name", page)
+        self.assertIn('>Hidden Bok</h2>', page)
         self.assertIn('<section class="bokword" aria-labelledby="bokword-title">', page)
         self.assertIn('<section class="boknections" id="boknections"', page)
         self.assertIn('<section class="boknections" id="bokopsaraki"', page)

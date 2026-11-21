@@ -1,0 +1,30 @@
+<div data-hidden-bok data-check-url="{{ check_url }}" data-progress-url="{{ progress_url }}"
+     data-csrf="{{ csrf_token() }}" {% if version is defined %}data-version="{{ version }}"{% endif %}>
+  <p class="hidden-bok-hint">{{ hint }}</p>
+  <form data-hidden-form>
+    <div class="hidden-bok-words" role="group" aria-label="Answer boxes">
+      {% for word in cells %}
+        {% set word_number = loop.index %}
+        <div class="hidden-bok-word">
+          {% for cell in word %}
+            <label class="crossword-square">
+              <span class="sr">Word {{ word_number }}, character {{ loop.index }}</span>
+              <input type="text" value="{{ cell }}" autocomplete="off" autocapitalize="off"
+                     spellcheck="false" data-hidden-square {% if solved or not g.user %}disabled{% endif %}>
+            </label>
+          {% endfor %}
+        </div>
+      {% endfor %}
+    </div>
+    {% if g.user %}
+      {% if solved %}
+        <p role="status">Solved!</p>
+      {% else %}
+        <button class="button" type="submit">Check answer</button>
+        <p class="crossword-status" aria-live="polite" data-hidden-status></p>
+      {% endif %}
+    {% else %}
+      <p><a href="{{ url_for('login', next=request.path) }}">Log in</a> to play.</p>
+    {% endif %}
+  </form>
+</div>

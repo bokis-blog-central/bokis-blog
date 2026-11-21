@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Hidden Bok archive | {% endblock %}
+{% block content %}
+<div class="wrap page narrow">
+  <h1 class="page-title">Hidden Bok archive</h1>
+  <nav class="archive-tabs" aria-label="Game archives">
+    <a class="button secondary" href="{{ url_for('bokword_archive') }}">Bokword</a>
+    <a class="button secondary" href="{{ url_for('boknections_archive') }}">Boknections</a>
+    <a class="button secondary" href="{{ url_for('hidden_bok_archive') }}">Hidden Bok</a>
+  </nav>
+  <ol class="post-list">
+    {% for entry in entries %}<li class="post-item"><a href="{{ url_for('hidden_bok_archive_entry', entry_id=entry.id) }}">Hidden Bok cleared {{ entry.cleared_at|date }}</a></li>
+    {% else %}<li>No archived Hidden Bok puzzles yet.</li>{% endfor %}
+  </ol>
+</div>
+{% endblock %}

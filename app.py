@@ -5,7 +5,6 @@ Full setup steps are in README.md.
 """
 import json
 import hmac
-import gzip
 import os
 import random
 import re
@@ -15,9 +14,10 @@ import time
 import uuid
 import unicodedata
 from datetime import datetime
-from functools import lru_cache, wraps
+from functools import wraps
 
 import click
+import regex
 from flask import (Flask, abort, flash, g, jsonify, redirect, render_template,
                    request, send_from_directory, session, url_for)
 from markupsafe import Markup, escape
@@ -211,6 +211,36 @@ CREATE TABLE IF NOT EXISTS bokopsaraki_history (
 );
 CREATE INDEX IF NOT EXISTS bokopsaraki_history_player
     ON bokopsaraki_history(user_id, puzzle_version, id);
+
+CREATE TABLE IF NOT EXISTS hidden_bok_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    answer TEXT NOT NULL,
+    hint TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS hidden_bok_progress (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    puzzle_version INTEGER NOT NULL,
+    answer TEXT NOT NULL DEFAULT '',
+    cells TEXT,
+    solved INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, puzzle_version)
+);
+CREATE TABLE IF NOT EXISTS hidden_bok_archive (
+    id INTEGER PRIMARY KEY,
+    answer TEXT NOT NULL,
+    hint TEXT NOT NULL,
+    victors TEXT NOT NULL DEFAULT '[]',
+    cleared_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS archive_progress (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    game TEXT NOT NULL,
+    entry_id INTEGER NOT NULL,
+    state TEXT NOT NULL DEFAULT '{}',
+    won INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, game, entry_id)
+);
 """
 
 
@@ -252,6 +282,9 @@ def migrate_db():
         },
         "crossword_completions": {
             "guess": "TEXT",
+        },
+        "hidden_bok_progress": {
+            "cells": "TEXT",
         },
         "comments": {
             "image": "TEXT",
@@ -572,37 +605,61 @@ def boknections_enabled():
     return get_setting("boknections_enabled") == "1"
 
 
-def greek_word_key(value):
-    normalized = unicodedata.normalize("NFD", value.strip().casefold())
-    return "".join(char for char in normalized if not unicodedata.combining(char))
-
-
-def valid_greek_word(word):
-    return 2 <= len(word) <= 40 and all("α" <= char <= "ω" for char in word)
-
-
-@lru_cache(maxsize=1)
-def greek_dictionary():
-    path = os.path.join(BASE_DIR, "data", "greek-el-GR.dic.gz")
-    with gzip.open(path, "rt", encoding="iso8859-7") as words:
-        count = int(next(words).strip())
-        entries = [greek_word_key(line) for line in words]
-    if len(entries) != count:
-        raise ValueError("The Greek dictionary is incomplete.")
-    return frozenset(word for word in entries if valid_greek_word(word))
-
-
 def get_bokopsaraki():
     return db().execute(
-        "SELECT start_word, end_word, version FROM bokopsaraki_state WHERE id = 1"
+        "SELECT answer, hint, version FROM hidden_bok_state WHERE id = 1"
     ).fetchone()
+
+
+def hidden_bok_key(value):
+    return unicodedata.normalize("NFC", " ".join(value.split())).casefold()
+
+
+def hidden_bok_shape(answer):
+    return [len(regex.findall(r"\X", word)) for word in answer.split()]
+
+
+def hidden_bok_cells(answer, shape):
+    words = answer.split()
+    result = []
+    for index, length in enumerate(shape):
+        chars = regex.findall(r"\X", words[index]) if index < len(words) else []
+        result.append((chars[:length] + [""] * length)[:length])
+    return result
+
+
+def validate_hidden_bok_cells(cells, shape):
+    if not isinstance(cells, list) or len(cells) != len(shape):
+        abort(400)
+    if not all(isinstance(word, list) and len(word) == length
+               for word, length in zip(cells, shape)):
+        abort(400)
+    if not all(isinstance(cell, str) and (not cell or (
+            len(cell) <= 500 and not any(char.isspace() for char in cell)
+            and regex.fullmatch(r"\X", cell))) for word in cells for cell in word):
+        abort(400)
+    guess = " ".join("".join(word) for word in cells)
+    if len(guess) > 500:
+        abort(400)
+    return guess
+
+
+def submitted_hidden_bok_cells(shape):
+    raw = request.form.get("cells")
+    if raw is None:
+        return None, request.form.get("answer", "")
+    try:
+        cells = json.loads(raw)
+    except ValueError:
+        abort(400)
+    return cells, validate_hidden_bok_cells(cells, shape)
 
 
 def fish_usernames():
     if "fish_users" not in g:
         rows = db().execute(
-            "SELECT u.username FROM bokopsaraki_progress p "
-            "JOIN bokopsaraki_state s ON s.id = 1 AND s.version = p.puzzle_version "
+            "SELECT u.username FROM hidden_bok_progress p "
+            "JOIN hidden_bok_state s ON s.id = 1 AND s.version = p.puzzle_version "
             "JOIN users u ON u.id = p.user_id WHERE p.solved = 1").fetchall()
         g.fish_users = {row["username"] for row in rows}
     return g.fish_users
@@ -1098,20 +1155,18 @@ def home():
         puzzle = get_bokopsaraki()
         if puzzle:
             progress = db().execute(
-                "SELECT current_word, solved FROM bokopsaraki_progress "
+                "SELECT answer, cells, solved FROM hidden_bok_progress "
                 "WHERE user_id = ? AND puzzle_version = ?",
                 (g.user["id"], puzzle["version"])).fetchone()
-            history = [row["word"] for row in db().execute(
-                "SELECT word FROM bokopsaraki_history WHERE user_id = ? AND puzzle_version = ? ORDER BY id",
-                (g.user["id"], puzzle["version"]))]
-            if progress and not history and progress["current_word"] != puzzle["start_word"]:
-                history = [progress["current_word"]]
             bokopsaraki = {
                 "puzzle": puzzle,
-                "current": progress["current_word"] if progress else puzzle["start_word"],
+                "shape": hidden_bok_shape(puzzle["answer"]),
+                "answer": progress["answer"] if progress else "",
                 "solved": bool(progress["solved"]) if progress else False,
-                "history": history,
             }
+            bokopsaraki["cells"] = (
+                json.loads(progress["cells"]) if progress and progress["cells"] else
+                hidden_bok_cells(bokopsaraki["answer"], bokopsaraki["shape"]))
         else:
             bokopsaraki = {"puzzle": None}
 
@@ -1869,8 +1924,6 @@ def admin():
                            bokword_guest=bokword_guest,
                            bokopsaraki=get_bokopsaraki(),
                            bokopsaraki_enabled=get_setting("bokopsaraki_enabled") == "1",
-                           bokopsaraki_words=db().execute(
-                               "SELECT word FROM bokopsaraki_words ORDER BY word").fetchall(),
                            **crossword_admin_context())
 
 
@@ -1980,127 +2033,74 @@ def admin_toggle_boknections():
 def admin_toggle_bokopsaraki():
     enabled = request.form.get("enabled") == "1"
     set_setting("bokopsaraki_enabled", "1" if enabled else "0")
-    flash("ΜΠΟΚΟΨΑΡΑΚΙΑ is now " + ("shown." if enabled else "hidden."), "ok")
+    flash("Hidden Bok is now " + ("shown." if enabled else "hidden."), "ok")
     return redirect(url_for("admin") + "#bokopsaraki")
 
 
 @app.post("/admin/bokopsaraki")
 @admin_required
 def admin_save_bokopsaraki():
-    start = greek_word_key(word_from_form("start_word"))
-    end = greek_word_key(word_from_form("end_word"))
-    if not valid_greek_word(start) or not valid_greek_word(end) or len(start) != len(end) or start == end:
-        flash("Enter two different Greek words of the same length (2 to 40 letters).", "error")
+    answer = unicodedata.normalize("NFC", " ".join(request.form.get("answer", "").split()))
+    hint = request.form.get("hint", "").strip()
+    if not answer or len(answer) > 500 or not hint or len(hint) > 10000:
+        flash("Enter an answer of up to 500 characters and a hint of up to 10000 characters.", "error")
         return redirect(url_for("admin") + "#bokopsaraki")
     db().execute("BEGIN IMMEDIATE")
     current = get_bokopsaraki()
     if current is None:
-        db().execute("INSERT INTO bokopsaraki_state (id, start_word, end_word) VALUES (1, ?, ?)",
-                     (start, end))
-        flash("ΜΠΟΚΟΨΑΡΑΚΙΑ puzzle saved.", "ok")
-    elif (current["start_word"], current["end_word"]) != (start, end):
-        db().execute("UPDATE bokopsaraki_state SET start_word = ?, end_word = ?, "
-                     "version = version + 1 WHERE id = 1", (start, end))
-        db().execute("DELETE FROM bokopsaraki_progress")
-        db().execute("DELETE FROM bokopsaraki_history")
-        flash("ΜΠΟΚΟΨΑΡΑΚΙΑ puzzle changed; progress and 🟘 badges were reset.", "ok")
+        db().execute("INSERT INTO hidden_bok_state (id, answer, hint) VALUES (1, ?, ?)",
+                     (answer, hint))
+        flash("Hidden Bok puzzle saved.", "ok")
+    elif (current["answer"], current["hint"]) != (answer, hint):
+        victors = [row["username"] for row in db().execute(
+            "SELECT u.username FROM hidden_bok_progress p JOIN users u ON u.id = p.user_id "
+            "WHERE p.puzzle_version = ? AND p.solved = 1", (current["version"],))]
+        db().execute("INSERT INTO hidden_bok_archive (answer, hint, victors) VALUES (?, ?, ?)",
+                     (current["answer"], current["hint"], json.dumps(victors, ensure_ascii=False)))
+        db().execute("UPDATE hidden_bok_state SET answer = ?, hint = ?, "
+                     "version = version + 1 WHERE id = 1", (answer, hint))
+        db().execute("DELETE FROM hidden_bok_progress")
+        flash("Hidden Bok puzzle archived and replaced; current badges were reset.", "ok")
     else:
-        flash("No ΜΠΟΚΟΨΑΡΑΚΙΑ changes to save.", "info")
+        flash("No Hidden Bok changes to save.", "info")
     db().commit()
     return redirect(url_for("admin") + "#bokopsaraki")
-
-
-@app.post("/admin/bokopsaraki/words")
-@admin_required
-def admin_bokopsaraki_words():
-    action = request.form.get("action")
-    word = greek_word_key(word_from_form("word"))
-    if action not in ("add", "remove") or not valid_greek_word(word):
-        flash("Enter a Greek word of 2 to 40 letters and choose an action.", "error")
-    elif action == "add":
-        db().execute("INSERT OR IGNORE INTO bokopsaraki_words (word) VALUES (?)", (word,))
-        db().commit()
-        flash("Word added to the custom wordlist.", "ok")
-    else:
-        db().execute("DELETE FROM bokopsaraki_words WHERE word = ?", (word,))
-        db().commit()
-        flash("Word removed from the custom wordlist.", "ok")
-    return redirect(url_for("admin") + "#bokopsaraki-words")
-
-
-def word_from_form(name):
-    letters = request.form.getlist(name + "_letter")
-    if letters:
-        if any(len(unicodedata.normalize("NFC", letter)) != 1 for letter in letters):
-            return ""
-        return "".join(letters)
-    return request.form.get(name, "")
 
 
 @app.post("/bokopsaraki/play")
 @login_required
 def play_bokopsaraki():
-    action = request.form.get("action")
     version = request.form.get("version", type=int)
-    if action not in ("guess", "reset"):
-        abort(400, "Invalid game action.")
-    guess = greek_word_key(word_from_form("word")) if action == "guess" else ""
-    dictionary = greek_dictionary() if action == "guess" and valid_greek_word(guess) else frozenset()
+    if request.form.get("action") not in ("save", "check"):
+        abort(400)
     db().execute("BEGIN IMMEDIATE")
     puzzle = get_bokopsaraki()
     if get_setting("bokopsaraki_enabled") != "1" or puzzle is None or version != puzzle["version"]:
         db().rollback()
-        flash("The puzzle is unavailable or has changed; reload and try again.", "error")
-        return redirect(url_for("home") + "#bokopsaraki")
-    progress = db().execute(
-        "SELECT current_word, solved FROM bokopsaraki_progress WHERE user_id = ? AND puzzle_version = ?",
-        (g.user["id"], version)).fetchone()
-    current = progress["current_word"] if progress else puzzle["start_word"]
-    solved = bool(progress["solved"]) if progress else False
-    if action == "reset":
-        db().execute("DELETE FROM bokopsaraki_history WHERE user_id = ? AND puzzle_version = ?",
-                     (g.user["id"], version))
-        db().execute(
-            "INSERT INTO bokopsaraki_progress (user_id, puzzle_version, current_word, solved) "
-            "VALUES (?, ?, ?, ?) ON CONFLICT(user_id, puzzle_version) "
-            "DO UPDATE SET current_word = excluded.current_word",
-            (g.user["id"], version, puzzle["start_word"], int(solved)))
-        flash("Word reset to the start.", "ok")
-    elif (not valid_greek_word(guess) or len(guess) != len(current)
-          or sum(a != b for a, b in zip(guess, current)) != 1):
-        db().rollback()
-        flash("Change exactly one Greek letter to make a word of the same length.", "error")
-        return redirect(url_for("home") + "#bokopsaraki")
-    elif (guess != puzzle["end_word"] and guess not in dictionary
-          and not db().execute("SELECT 1 FROM bokopsaraki_words WHERE word = ?", (guess,)).fetchone()):
-        db().rollback()
-        flash("That word is not in the Greek wordlist.", "error")
-        return redirect(url_for("home") + "#bokopsaraki")
-    else:
-        reached_end = guess == puzzle["end_word"]
-        new_victory = reached_end and not solved
-        solved = solved or reached_end
-        if current != puzzle["start_word"] and not db().execute(
-                "SELECT 1 FROM bokopsaraki_history WHERE user_id = ? AND puzzle_version = ?",
-                (g.user["id"], version)).fetchone():
-            db().execute(
-                "INSERT INTO bokopsaraki_history (user_id, puzzle_version, word) VALUES (?, ?, ?)",
-                (g.user["id"], version, current))
-        db().execute(
-            "INSERT INTO bokopsaraki_history (user_id, puzzle_version, word) VALUES (?, ?, ?)",
-            (g.user["id"], version, guess))
-        db().execute(
-            "INSERT INTO bokopsaraki_progress (user_id, puzzle_version, current_word, solved) "
-            "VALUES (?, ?, ?, ?) ON CONFLICT(user_id, puzzle_version) "
-            "DO UPDATE SET current_word = excluded.current_word, solved = excluded.solved",
-            (g.user["id"], version, guess, int(solved)))
-        if new_victory:
-            db().execute("UPDATE users SET bokopsaraki_victories = bokopsaraki_victories + 1 WHERE id = ?",
-                         (g.user["id"],))
-        flash("Puzzle solved! You earned a red 🟘." if new_victory else
-              "Puzzle solved again!" if reached_end else "Word accepted.", "ok")
+        return jsonify(error="The puzzle is unavailable or has changed; reload and try again."), 409
+    cells, guess = submitted_hidden_bok_cells(hidden_bok_shape(puzzle["answer"]))
+    if len(guess) > 500:
+        abort(400)
+    progress = db().execute("SELECT solved FROM hidden_bok_progress WHERE user_id = ? AND puzzle_version = ?",
+                            (g.user["id"], version)).fetchone()
+    solved = (request.form.get("action") == "check"
+              and (cells is None or all(cell for word in cells for cell in word))
+              and hidden_bok_key(guess) == hidden_bok_key(puzzle["answer"]))
+    was_solved = bool(progress and progress["solved"])
+    if was_solved:
+        db().commit()
+        return jsonify(solved=True, saved=True)
+    db().execute(
+        "INSERT INTO hidden_bok_progress (user_id, puzzle_version, answer, cells, solved) VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT(user_id, puzzle_version) DO UPDATE SET answer = excluded.answer, "
+        "cells = excluded.cells, solved = MAX(solved, excluded.solved)",
+        (g.user["id"], version, guess,
+         json.dumps(cells, ensure_ascii=False) if cells is not None else None, int(solved)))
+    if solved and not was_solved:
+        db().execute("UPDATE users SET bokopsaraki_victories = bokopsaraki_victories + 1 WHERE id = ?",
+                     (g.user["id"],))
     db().commit()
-    return redirect(url_for("home") + "#bokopsaraki")
+    return jsonify(solved=solved, saved=True)
 
 
 @app.post("/admin/boknections")
@@ -2280,16 +2280,32 @@ def solve_crossword():
 
 
 @app.post("/boknections/check")
+@app.post("/boknections-archive/<int:entry_id>/check")
 @login_required
-def check_boknections():
-    puzzle = get_boknections() if boknections_enabled() else None
+def check_boknections(entry_id=None):
+    if entry_id is not None:
+        row = db().execute("SELECT puzzle FROM boknections_archive WHERE id = ?", (entry_id,)).fetchone()
+        if row is None:
+            abort(404)
+        puzzle = json.loads(row["puzzle"])
+        puzzle["version"] = entry_id
+    else:
+        puzzle = get_boknections() if boknections_enabled() else None
     if puzzle is None:
         abort(404)
     user_id, version = g.user["id"], puzzle["version"]
-    db().execute(
-        "INSERT OR IGNORE INTO boknections_progress (user_id, puzzle_version) "
-        "VALUES (?, ?)", (user_id, version))
-    progress = get_boknections_progress(user_id, version)
+    db().execute("BEGIN IMMEDIATE")
+    if entry_id is None:
+        db().execute(
+            "INSERT OR IGNORE INTO boknections_progress (user_id, puzzle_version) "
+            "VALUES (?, ?)", (user_id, version))
+        progress = get_boknections_progress(user_id, version)
+    else:
+        progress, _ = load_archive_progress("boknections", entry_id)
+        progress = {"attempts_used": progress.get("attempts_used", 0),
+                    "locked": progress.get("locked", []),
+                    "wild_found": progress.get("wild_found", False),
+                    "solved": progress.get("solved", False)}
     if progress["solved"] or progress["attempts_used"] >= BOKNECTIONS_ATTEMPTS:
         return jsonify(error="You have no attempts left."), 400
 
@@ -2328,16 +2344,26 @@ def check_boknections():
     wild_now = progress["wild_found"] or wild_word == puzzle["wild"]
     locked = sorted(progress["locked"] + newly)
     solved = len(locked) == BOKNECTIONS_GROUPS and wild_now
-    update = db().execute(
-        "UPDATE boknections_progress SET attempts_used = attempts_used + 1, "
-        "locked = ?, wild_found = ?, solved = ? "
-        "WHERE user_id = ? AND puzzle_version = ? AND attempts_used = ? AND solved = 0",
-        (json.dumps(locked), int(wild_now), int(solved), user_id, version,
-         progress["attempts_used"]))
-    if update.rowcount != 1:
-        db().rollback()
-        return jsonify(error="That attempt was already recorded. Reload the page."), 409
-    if solved:
+    if entry_id is not None:
+        state, won = load_archive_progress("boknections", entry_id)
+        placement = state.get("placement")
+        if isinstance(placement, dict) and isinstance(placement.get("groups"), list):
+            found = [set(categories[i]["words"]) for i in newly]
+            placement["groups"] = [
+                group for group in placement["groups"]
+                if not (isinstance(group, list) and all(isinstance(word, str) for word in group)
+                        and set(group) in found)]
+            if wild_now:
+                placement["wild"] = None
+        state.update(attempts_used=progress["attempts_used"] + 1, locked=locked,
+                     wild_found=wild_now, solved=solved)
+        save_archive_state("boknections", entry_id, state, won or solved)
+    else:
+        db().execute(
+            "UPDATE boknections_progress SET attempts_used = attempts_used + 1, "
+            "locked = ?, wild_found = ?, solved = ? WHERE user_id = ? AND puzzle_version = ?",
+            (json.dumps(locked), int(wild_now), int(solved), user_id, version))
+    if solved and entry_id is None:
         db().execute(
             "UPDATE users SET boknections_victories = boknections_victories + 1 "
             "WHERE id = ?", (user_id,))
@@ -2406,6 +2432,101 @@ def admin_signup_password():
 # ----------------------------------------------------------------------
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def load_archive_progress(game, entry_id):
+    if g.user is None:
+        return {}, False
+    row = db().execute(
+        "SELECT state, won FROM archive_progress WHERE user_id = ? AND game = ? AND entry_id = ?",
+        (g.user["id"], game, entry_id)).fetchone()
+    return (json.loads(row["state"]), bool(row["won"])) if row else ({}, False)
+
+
+def save_archive_state(game, entry_id, state, won):
+    db().execute(
+        "INSERT INTO archive_progress (user_id, game, entry_id, state, won) VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT(user_id, game, entry_id) DO UPDATE SET state = excluded.state, "
+        "won = MAX(won, excluded.won)",
+        (g.user["id"], game, entry_id, json.dumps(state, ensure_ascii=False), int(won)))
+
+
+def archive_puzzle(game, entry_id):
+    tables = {"bokword": "bokword_archive", "boknections": "boknections_archive",
+              "hidden-bok": "hidden_bok_archive"}
+    if game not in tables:
+        abort(404)
+    row = db().execute(f"SELECT * FROM {tables[game]} WHERE id = ?", (entry_id,)).fetchone()
+    if row is None:
+        abort(404)
+    return row
+
+
+@app.post("/archive/<game>/<int:entry_id>/progress")
+@login_required
+def save_archive_progress(game, entry_id):
+    row = archive_puzzle(game, entry_id)
+    try:
+        value = json.loads(request.form.get("state", request.form.get("answers", "")))
+    except ValueError:
+        abort(400)
+    db().execute("BEGIN IMMEDIATE")
+    state, won = load_archive_progress(game, entry_id)
+    if game == "bokword":
+        if not isinstance(value, dict):
+            abort(400)
+        answers = {}
+        for key, letter in value.items():
+            if isinstance(key, str) and key.isdigit() and 0 <= int(key) < 225 and isinstance(letter, str):
+                letter = normalize_crossword_text(letter)
+                if len(letter) == 1 and row["solution"][int(key)] != "#":
+                    answers[key] = letter
+        state["answers"] = answers
+    elif game == "hidden-bok":
+        if isinstance(value, list):
+            state["answer"] = validate_hidden_bok_cells(value, hidden_bok_shape(row["answer"]))
+            state["cells"] = value
+        elif isinstance(value, str) and len(value) <= 500:
+            state["answer"] = value
+            state.pop("cells", None)
+        else:
+            abort(400)
+    else:
+        if not isinstance(value, dict):
+            abort(400)
+        groups, wild = value.get("groups"), value.get("wild")
+        if (not isinstance(groups, list) or len(groups) > BOKNECTIONS_GROUPS
+                or not all(isinstance(group, list) and len(group) == 3
+                           and all(word is None or isinstance(word, str) for word in group)
+                           for group in groups)
+                or not (wild is None or isinstance(wild, str))):
+            abort(400)
+        puzzle = json.loads(row["puzzle"])
+        available = {word for category in puzzle["categories"] for word in category["words"]}
+        available.add(puzzle["wild"])
+        placed = [word for group in groups for word in group if word is not None]
+        if wild is not None:
+            placed.append(wild)
+        if len(placed) != len(set(placed)) or not set(placed) <= available:
+            abort(400)
+        state["placement"] = value
+    save_archive_state(game, entry_id, state, won)
+    db().commit()
+    return jsonify(saved=True)
+
+
+@app.post("/archive/<game>/<int:entry_id>/reset")
+@login_required
+def reset_archive_progress(game, entry_id):
+    archive_puzzle(game, entry_id)
+    db().execute("BEGIN IMMEDIATE")
+    _, won = load_archive_progress(game, entry_id)
+    save_archive_state(game, entry_id, {}, won)
+    db().commit()
+    flash("Puzzle reset. Your archive victory is kept.", "ok")
+    endpoints = {"bokword": "bokword_archive_entry", "boknections": "boknections_archive_entry",
+                 "hidden-bok": "hidden_bok_archive_entry"}
+    return redirect(url_for(endpoints[game], entry_id=entry_id))
 
 
 def valid_date(value):
@@ -2523,6 +2644,7 @@ def bokword_archive_entry(entry_id):
             "JOIN users u ON u.id = p.user_id WHERE p.id = ?",
             (row["post_id"],)).fetchone()
     victors = json.loads(row["victors"])
+    state, won = load_archive_progress("bokword", entry_id)
     existing = set()
     if victors:
         marks = ",".join("?" for _ in victors)
@@ -2531,17 +2653,24 @@ def bokword_archive_entry(entry_id):
     return render_template("archive_entry.html", entry=row, post=post,
                            crossword=crossword, crossword_entries=entries,
                            crossword_connected_cells=connected_cells,
-                           crossword_completed=False, crossword_answers="",
-                           crossword_saved={}, victors=victors,
+                           crossword_completed=bool(state.get("solved")), crossword_answers=state.get("guess", ""),
+                           crossword_saved=state.get("answers", {}), archive_won=won, victors=victors,
                            existing_users=existing)
 
 
 @app.post("/bokword-archive/<int:entry_id>/check")
+@login_required
 def check_archive_bokword(entry_id):
     row = get_archive_entry(entry_id)
     guess = normalize_crossword_text(request.form.get("guess", ""))
     solved = len(guess) == 225 and (
         crossword_match_key(guess) == crossword_match_key(row["solution"]))
+    if solved:
+        db().execute("BEGIN IMMEDIATE")
+        state, _ = load_archive_progress("bokword", entry_id)
+        state.update(solved=True, guess=guess)
+        save_archive_state("bokword", entry_id, state, True)
+        db().commit()
     return jsonify(solved=solved)
 
 
@@ -2570,9 +2699,55 @@ def boknections_archive_entry(entry_id):
         marks = ",".join("?" for _ in victors)
         existing = {r["username"] for r in db().execute(
             f"SELECT username FROM users WHERE username IN ({marks})", victors)}
+    state, won = load_archive_progress("boknections", entry_id)
+    puzzle = json.loads(row["puzzle"])
+    puzzle["version"] = entry_id
+    progress = {"attempts_used": state.get("attempts_used", 0),
+                "locked": state.get("locked", []), "wild_found": state.get("wild_found", False),
+                "solved": state.get("solved", False)}
     return render_template("archive_boknections_entry.html", entry=row,
-                           puzzle=json.loads(row["puzzle"]), victors=victors,
+                           boknections=boknections_board(puzzle, progress),
+                           placement=state.get("placement"), archive_won=won, victors=victors,
                            existing_users=existing)
+
+
+@app.get("/hidden-bok-archive")
+def hidden_bok_archive():
+    rows = db().execute("SELECT id, cleared_at, victors FROM hidden_bok_archive "
+                        "ORDER BY cleared_at DESC, id DESC").fetchall()
+    return render_template("archive_hidden_bok.html", entries=rows)
+
+
+@app.get("/hidden-bok-archive/<int:entry_id>")
+def hidden_bok_archive_entry(entry_id):
+    row = archive_puzzle("hidden-bok", entry_id)
+    state, won = load_archive_progress("hidden-bok", entry_id)
+    shape = hidden_bok_shape(row["answer"])
+    return render_template("archive_hidden_bok_entry.html", entry=row,
+                           shape=shape, state=state,
+                           cells=state.get("cells", hidden_bok_cells(state.get("answer", ""), shape)),
+                           archive_won=won, victors=json.loads(row["victors"]))
+
+
+@app.post("/hidden-bok-archive/<int:entry_id>/check")
+@login_required
+def check_hidden_bok_archive(entry_id):
+    row = archive_puzzle("hidden-bok", entry_id)
+    cells, guess = submitted_hidden_bok_cells(hidden_bok_shape(row["answer"]))
+    if len(guess) > 500:
+        abort(400)
+    solved = ((cells is None or all(cell for word in cells for cell in word))
+              and hidden_bok_key(guess) == hidden_bok_key(row["answer"]))
+    db().execute("BEGIN IMMEDIATE")
+    state, won = load_archive_progress("hidden-bok", entry_id)
+    state.update(answer=guess, solved=solved or state.get("solved", False))
+    if cells is None:
+        state.pop("cells", None)
+    else:
+        state["cells"] = cells
+    save_archive_state("hidden-bok", entry_id, state, won or solved)
+    db().commit()
+    return jsonify(solved=solved)
 
 
 @app.get("/admin/archive")
@@ -2647,6 +2822,7 @@ def admin_archive_update(entry_id):
 @admin_required
 def admin_archive_delete(entry_id):
     get_archive_entry(entry_id)
+    db().execute("DELETE FROM archive_progress WHERE game = 'bokword' AND entry_id = ?", (entry_id,))
     db().execute("DELETE FROM bokword_archive WHERE id = ?", (entry_id,))
     db().commit()
     flash("Archive entry removed.", "ok")
@@ -2695,7 +2871,7 @@ def admin_boknections_archive_add():
 @admin_required
 def admin_boknections_archive_update(entry_id):
     row = db().execute(
-        "SELECT cleared_at FROM boknections_archive WHERE id = ?", (entry_id,)
+        "SELECT cleared_at, puzzle FROM boknections_archive WHERE id = ?", (entry_id,)
     ).fetchone()
     if row is None:
         abort(404)
@@ -2709,6 +2885,9 @@ def admin_boknections_archive_update(entry_id):
     cleared_at = row["cleared_at"]
     if cleared != cleared_at[:10]:
         cleared_at = f"{cleared} 12:00:00"
+    if json.loads(row["puzzle"]) != puzzle:
+        db().execute("UPDATE archive_progress SET state = '{}' WHERE game = 'boknections' AND entry_id = ?",
+                     (entry_id,))
     db().execute(
         "UPDATE boknections_archive SET puzzle = ?, victors = ?, cleared_at = ? "
         "WHERE id = ?",
@@ -2723,6 +2902,8 @@ def admin_boknections_archive_update(entry_id):
 @app.post("/admin/archive/boknections/<int:entry_id>/delete")
 @admin_required
 def admin_boknections_archive_delete(entry_id):
+    archive_puzzle("boknections", entry_id)
+    db().execute("DELETE FROM archive_progress WHERE game = 'boknections' AND entry_id = ?", (entry_id,))
     db().execute("DELETE FROM boknections_archive WHERE id = ?", (entry_id,))
     db().commit()
     flash("Boknections removed from the archive.", "ok")

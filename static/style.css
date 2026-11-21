@@ -170,7 +170,7 @@ h1, h2, h3, h4 {
   padding: 2px; background: var(--ink); border: 3px solid var(--ink);
 }
 .crossword-grid { min-width: 0; }
-.crossword-grid .crossword-square {
+.crossword-grid .crossword-square, .hidden-bok-word .crossword-square {
   --cell-bg: var(--surface);
   position: relative; min-width: 0; min-height: 0; width: 100%; height: 100%;
   display: grid; place-items: center; border-radius: 0;
@@ -192,13 +192,13 @@ h1, h2, h3, h4 {
   font-size: clamp(0.5rem, 1vw, 0.75rem); line-height: 1;
   font-variant-numeric: tabular-nums; pointer-events: none;
 }
-.crossword-grid .crossword-square input[type="text"] {
+.crossword-grid .crossword-square input[type="text"], .hidden-bok-word .crossword-square input[type="text"] {
   width: 100%; height: 100%; min-width: 0; padding: 0;
   border: 0; border-radius: 0; background: transparent;
   color: var(--ink); text-align: center; text-transform: uppercase;
   font: inherit; line-height: 1;
 }
-.crossword-grid .crossword-square input[type="text"]:focus-visible {
+.crossword-grid .crossword-square input[type="text"]:focus-visible, .hidden-bok-word .crossword-square input[type="text"]:focus-visible {
   position: relative; z-index: 1; outline-offset: 0; border-radius: 0;
 }
 .admin-crossword-cell.is-connected:not(.is-blocked) { background: #AC8E65; }
@@ -258,6 +258,10 @@ h1, h2, h3, h4 {
 }
 .bokn-pool .bokn-tile { flex: 0 0 auto; }
 .bokn-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin-top: 1rem; }
+.hidden-bok-hint { white-space: pre-wrap; }
+.hidden-bok-words { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 0.75rem; margin: 1rem 0; }
+.hidden-bok-word { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 1px; padding: 2px; background: var(--ink); border: 3px solid var(--ink); }
+.hidden-bok-word .crossword-square { flex: 0 0 2.25rem; width: 2.25rem; height: 2.25rem; }
 .bokn-admin-category { display: grid; gap: 0.5rem; border: 1px solid var(--line); border-radius: 8px; padding: 0.75rem; }
 
 .section-title { font-size: 1.5rem; font-weight: 700; margin-bottom: 1rem; }

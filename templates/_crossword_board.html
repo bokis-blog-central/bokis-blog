@@ -19,7 +19,7 @@
                   {% endif %}
                   {% if not crossword_completed %}
                     <input class="crossword-cell" type="text" maxlength="1" autocomplete="off"
-                           data-crossword-cell="{{ index }}">
+                           data-crossword-cell="{{ index }}" {% if archive_game is defined and not g.user %}disabled{% endif %}>
                   {% else %}
                     <span aria-hidden="true">{{ crossword_answers[index] }}</span>
                   {% endif %}

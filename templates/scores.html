@@ -9,7 +9,7 @@
   <nav class="score-tabs" aria-label="Score games">
     <a href="{{ url_for('scores', game='bokword') }}" {% if game == 'bokword' %}aria-current="page"{% endif %}>Bokword</a>
     {% if boknections_enabled %}<a href="{{ url_for('scores', game='boknections') }}" {% if game == 'boknections' %}aria-current="page"{% endif %}>Boknections</a>{% endif %}
-    {% if bokopsaraki_enabled %}<a href="{{ url_for('scores', game='bokopsaraki') }}" {% if game == 'bokopsaraki' %}aria-current="page"{% endif %}>ΜΠΟΚΟΨΑΡΑΚΙΑ</a>{% endif %}
+    {% if bokopsaraki_enabled %}<a href="{{ url_for('scores', game='bokopsaraki') }}" {% if game == 'bokopsaraki' %}aria-current="page"{% endif %}>Hidden Bok</a>{% endif %}
   </nav>
 
   {% if score_users %}

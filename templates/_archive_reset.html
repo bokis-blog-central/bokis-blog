@@ -1,0 +1,4 @@
+<form method="post" action="{{ url_for('reset_archive_progress', game=archive_game, entry_id=entry.id) }}" data-archive-reset>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <button class="button secondary" type="submit">Reset puzzle</button>
+</form>

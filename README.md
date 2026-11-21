@@ -42,21 +42,23 @@ A small multi-user blog built with Flask and SQLite.
   them. Each user has 10 checks and can check categories one at a time; correct categories lock and reveal their titles.
   Solvers earn a flower by their username and a win on their profile. Saving a new
   puzzle in the admin page resets attempts and flowers but keeps win counts.
-- ΜΠΟΚΟΨΑΡΑΚΙΑ: an admin-togglable Greek word ladder. Change one letter at a
-  time to reach the destination, with unlimited guesses and a reset button.
-  Accents and case are ignored. Admins can add missing words, select the two
-  endpoints, and toggle the game. A solver receives a red 🟘 until the
-  puzzle changes, and earns a cumulative victory. The destination selected by
-  the admin is accepted even if absent from the dictionary. Accepted words are
-  saved as a ladder of letter cells; restarting clears the ladder but keeps an
-  earned badge. Older progress can only show its last saved word.
-- Scores page: logged-in users can view separate Bokword, Boknections and ΜΠΟΚΟΨΑΡΑΚΙΑ rankings
+- Hidden Bok: an admin-togglable word or phrase puzzle with a multi-paragraph
+  hint. Answers can include Greek, English, numbers, symbols and emoji; each
+  grapheme has an editable square and spaces separate words. Checking ignores case
+  and repeated whitespace but preserves accents. Answers can be up to 500
+  characters and hints up to 10,000. Solvers earn a red 🟘 and a cumulative
+  victory; replacing the puzzle archives it and clears current badges. Existing
+  word-ladder victory totals are retained, but old ladder puzzles are not
+  converted to Hidden Bok puzzles.
+- Scores page: logged-in users can view separate Bokword, Boknections and Hidden Bok rankings
   for non-admin players with at least one victory in that game. Tabs for hidden games are hidden, while
   saved scores remain available. Admins can manually adjust cumulative victory counts
   from the Admin page.
-- Game archives: cleared Bokwords and replaced Boknections puzzles are preserved
-  with their original victors; admins can edit archived puzzles from the collapsed
-  archive editor.
+- Game archives: cleared Bokwords and replaced Boknections and Hidden Bok puzzles
+  are preserved with their original victors. Logged-in players' archive inputs and
+  victories are saved to their accounts. Resetting an archive puzzle clears its
+  current attempt but keeps its archive victory; archive wins do not affect main
+  scores or badges. Admins can edit Bokword and Boknections archive entries.
 
 ## Setup
 
@@ -128,9 +130,3 @@ fine for a small site on one process.
 User-uploaded profile and post images are stored in
 `<BLOG_DATA_DIR>/uploads/`. Supported formats are PNG, JPEG, GIF and WebP, with
 a 5 MB limit per image. Back up this directory along with the database.
-
-The Greek wordlist is the el_GR Hunspell dictionary by Evripidis Papakostas,
-Steve Stavropulos and contributors, distributed under MPL 1.1/GPL 2.0/LGPL 2.1.
-The pinned source is
-https://github.com/elastic/hunspell/tree/cc1e74c4ca711f0625f6b73f883197794379aa97/dicts/el_GR.
-The dictionary notice and MPL 1.1 license are included in `data/`.

@@ -7,6 +7,7 @@
   <nav class="archive-tabs" aria-label="Game archives">
     <a class="button secondary" href="{{ url_for('bokword_archive') }}">Bokword</a>
     <a class="button secondary" href="{{ url_for('boknections_archive') }}">Boknections</a>
+    <a class="button secondary" href="{{ url_for('hidden_bok_archive') }}">Hidden Bok</a>
   </nav>
 
   <form class="archive-filter" method="get" action="{{ url_for('bokword_archive') }}" data-archive-filter>

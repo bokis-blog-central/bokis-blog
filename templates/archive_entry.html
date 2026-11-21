@@ -17,14 +17,22 @@
   </ul>
 
   <section class="bokword" aria-label="Practice Bokword">
-    <div class="bokword-board" data-crossword-board data-practice="true">
+    {% set archive_game = 'bokword' %}
+    {% if archive_won %}<p role="status">Archive victory earned.</p>{% endif %}
+    {% if g.user %}{% include "_archive_reset.html" %}{% endif %}
+    <div class="bokword-board" data-crossword-board data-practice="true"
+         {% if g.user %}data-progress-url="{{ url_for('save_archive_progress', game='bokword', entry_id=entry.id) }}"
+         data-csrf="{{ csrf_token() }}" data-saved-answers='{{ crossword_saved|tojson }}'{% endif %}>
       {% include "_crossword_board.html" %}
+      {% if g.user and not crossword_completed %}
       <form class="crossword-solve-form" method="post" action="{{ url_for('check_archive_bokword', entry_id=entry.id) }}" data-crossword-solve-form>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="guess" value="" data-crossword-guess>
         <button class="button" type="submit">Check answers</button>
         <p class="crossword-status" aria-live="polite" data-crossword-status></p>
       </form>
+      {% elif not g.user %}<p><a href="{{ url_for('login', next=request.path) }}">Log in</a> to save progress and solve.</p>
+      {% else %}<p role="status">Solved!</p>{% endif %}
     </div>
   </section>
 </div>

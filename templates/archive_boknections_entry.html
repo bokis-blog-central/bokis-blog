@@ -4,19 +4,42 @@
 <div class="wrap page narrow">
   <p><a href="{{ url_for('boknections_archive') }}">&larr; Boknections archive</a></p>
   <h1 class="page-title">Boknections cleared {{ entry.cleared_at|date }}</h1>
-  <ul class="meta">
-    <li>Original {{ 'victor' if victors|length == 1 else 'victors' }}:
-      {% if victors %}{% for name in victors %}{% if name in existing_users %}<a href="{{ url_for('profile', username=name) }}">{{ name }}</a>{% else %}{{ name }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}none{% endif %}
-    </li>
-  </ul>
-  <section class="boknections archive-boknections">
-    {% for category in puzzle.categories %}
-      <article class="bokn-field is-locked">
-        <h2>{{ category.title }}</h2>
-        <ul class="bokn-slots">{% for word in category.words %}<li class="bokn-tile">{{ word }}</li>{% endfor %}</ul>
-      </article>
-    {% endfor %}
-    <article class="bokn-field bokn-wild is-locked"><h2>Wild Card</h2><ul class="bokn-slots"><li class="bokn-tile">{{ puzzle.wild }}</li></ul></article>
+  <p>Original victors: {% for name in victors %}{% if name in existing_users %}<a href="{{ url_for('profile', username=name) }}">{{ name }}</a>{% else %}{{ name }}{% endif %}{% if not loop.last %}, {% endif %}{% else %}none{% endfor %}</p>
+  {% if archive_won %}<p role="status">Archive victory earned.</p>{% endif %}
+  {% if g.user %}{% set archive_game = 'boknections' %}{% include "_archive_reset.html" %}{% endif %}
+  <section class="boknections archive-boknections" data-boknections
+           data-playable="{{ 'true' if g.user and not boknections.solved and not boknections.over else 'false' }}"
+           data-check-url="{{ url_for('check_boknections', entry_id=entry.id) }}"
+           data-progress-url="{{ url_for('save_archive_progress', game='boknections', entry_id=entry.id) }}"
+           data-placement='{{ placement|tojson }}' data-csrf="{{ csrf_token() }}"
+           data-storage-key="archive-boknections-{{ entry.id }}-{{ g.user.id if g.user else 0 }}">
+    <p class="help">Place the words in four groups of three and find the wild card. You have {{ boknections.attempts_max }} checks.</p>
+    <div class="bokn-board">
+      {% for group in boknections.locked %}
+        <div class="bokn-field is-locked{% if group.missed %} is-missed{% endif %}">
+          <h3>{{ group.title }}</h3>
+          <ul class="bokn-slots">{% for word in group.words %}<li class="bokn-tile">{{ word }}</li>{% endfor %}</ul>
+        </div>
+      {% endfor %}
+      {% for n in range(boknections.open_groups) %}
+        <div class="bokn-field" data-bokn-field role="group" aria-label="Group of three, {{ loop.index }}">
+          <h3 class="bokn-unknown">???</h3>
+          <div class="bokn-slots">{% for s in range(3) %}<div class="bokn-slot" data-bokn-slot></div>{% endfor %}</div>
+        </div>
+      {% endfor %}
+      {% if boknections.wild %}
+        <div class="bokn-field bokn-wild is-locked{% if boknections.wild_missed %} is-missed{% endif %}"><h3>Wild Card</h3><ul class="bokn-slots"><li class="bokn-tile">{{ boknections.wild }}</li></ul></div>
+      {% else %}
+        <div class="bokn-field bokn-wild" data-bokn-wild role="group" aria-label="Wild card"><h3>Wild Card</h3><div class="bokn-slots"><div class="bokn-slot" data-bokn-slot></div></div></div>
+      {% endif %}
+    </div>
+    {% if boknections.pool %}
+      <div class="bokn-pool" data-bokn-pool aria-label="Words to place">{% for word in boknections.pool %}<button class="bokn-tile" type="button" draggable="true" data-bokn-tile data-word="{{ word }}" {% if not g.user %}disabled{% endif %}>{{ word }}</button>{% endfor %}</div>
+    {% endif %}
+    {% if not g.user %}<p><a href="{{ url_for('login', next=request.path) }}">Log in</a> to play.</p>
+    {% elif boknections.solved %}<p role="status">Solved!</p>
+    {% elif boknections.over %}<p role="status">Out of attempts. Reset to try again.</p>
+    {% else %}<div class="bokn-controls"><button class="button" type="button" data-bokn-check disabled>Check</button><p class="crossword-status" aria-live="polite" data-bokn-status>Attempts left: {{ boknections.attempts_left }} of {{ boknections.attempts_max }}.</p></div>{% endif %}
   </section>
 </div>
 {% endblock %}

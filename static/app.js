@@ -373,22 +373,32 @@ function initializeCrosswordSolver() {
   }
 
   let saveTimer = null;
+  let pendingSave = Promise.resolve();
   const saveProgress = () => {
     if (!progressUrl) return;
     const answers = {};
     cells.forEach((c) => {
       if (c.value) answers[Number(c.dataset.crosswordCell)] = c.value;
     });
-    fetch(progressUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      credentials: "same-origin",
-      keepalive: true,
-      body: new URLSearchParams({
-        csrf_token: board.dataset.csrf,
-        answers: JSON.stringify(answers),
-      }),
-    }).catch(() => {});
+    pendingSave = pendingSave.catch(() => {}).then(async () => {
+      const response = await fetch(progressUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        credentials: "same-origin",
+        keepalive: true,
+        body: new URLSearchParams({
+          csrf_token: board.dataset.csrf,
+          answers: JSON.stringify(answers),
+        }),
+      });
+      if (!response.ok) throw new Error("Could not save your answers.");
+    });
+    pendingSave.catch((error) => {
+      const status = document.querySelector("[data-crossword-status]");
+      if (status) status.textContent = error.message;
+      else console.error(error);
+    });
+    return pendingSave;
   };
   const scheduleSave = () => {
     clearTimeout(saveTimer);
@@ -571,6 +581,9 @@ function initializeCrosswordSolver() {
     button.disabled = true;
     status.textContent = "Checking your answers…";
     try {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+      await pendingSave;
       const response = await fetch(form.action, {
         method: "POST",
         headers: {
@@ -584,7 +597,7 @@ function initializeCrosswordSolver() {
       const result = await response.json();
       if (result.solved) {
         if (board?.dataset.practice) {
-          status.textContent = "Solved! Nice work.";
+          window.location.reload();
           return;
         }
         status.textContent = "Puzzle solved! Your star is being added.";
@@ -598,6 +611,17 @@ function initializeCrosswordSolver() {
       status.textContent = error.message;
     } finally {
       button.disabled = false;
+    }
+  });
+  document.querySelector("[data-archive-reset]")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    try {
+      await pendingSave;
+      event.target.submit();
+    } catch (error) {
+      if (status) status.textContent = error.message;
     }
   });
 }
@@ -776,6 +800,8 @@ function initializeBoknections() {
   const slotsOf = (field) => Array.from(field.querySelectorAll("[data-bokn-slot]"));
   const tileIn = (container) => container.querySelector("[data-bokn-tile]");
   const storageKey = root.dataset.storageKey;
+  const progressUrl = root.dataset.progressUrl;
+  let pendingSave = Promise.resolve();
   let selected = null;
   let dragged = null;
 
@@ -791,13 +817,27 @@ function initializeBoknections() {
     return { groups: current.groups.filter((group) => group.every(Boolean)), wild: current.wild };
   }
 
-  function refresh() {
+  function refresh(save = true) {
     const current = arrangement();
     checkButton.disabled = !current.groups.some((group) => group.every(Boolean)) && !current.wild;
-    localStorage.setItem(storageKey, JSON.stringify({
-      groups: current.groups.map((group) => group.filter(Boolean)),
+    const placement = {
+      groups: current.groups,
       wild: current.wild,
-    }));
+    };
+    if (!save) return;
+    if (!progressUrl) {
+      localStorage.setItem(storageKey, JSON.stringify(placement));
+      return;
+    }
+    pendingSave = pendingSave.catch(() => {}).then(async () => {
+      const response = await fetch(progressUrl, {
+        method: "POST", credentials: "same-origin", keepalive: true,
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ csrf_token: root.dataset.csrf, state: JSON.stringify(placement) }),
+      });
+      if (!response.ok) throw new Error("Could not save your placement.");
+    });
+    pendingSave.catch((error) => { status.textContent = error.message; });
   }
 
   function select(tile) {
@@ -864,7 +904,7 @@ function initializeBoknections() {
 
   // Put words back where the player left them before the page reloaded.
   try {
-    const saved = JSON.parse(localStorage.getItem(storageKey) ?? "null");
+    const saved = JSON.parse(progressUrl ? root.dataset.placement : localStorage.getItem(storageKey) ?? "null");
     if (saved) {
       const byWord = new Map(tiles.map((tile) => [tile.dataset.word, tile]));
       const take = (word, slot) => {
@@ -873,7 +913,8 @@ function initializeBoknections() {
         byWord.delete(word);
         slot.append(tile);
       };
-      const groups = (saved.groups ?? []).map((g) => g.filter((w) => byWord.has(w))).filter((g) => g.length);
+      let groups = (saved.groups ?? []).map((g) => g.map((w) => byWord.has(w) ? w : null));
+      if (!progressUrl) groups = groups.filter((g) => g.some(Boolean));
       groups.slice(0, fields.length).forEach((group, index) => {
         group.forEach((word, position) => take(word, slotsOf(fields[index])[position]));
       });
@@ -882,12 +923,13 @@ function initializeBoknections() {
   } catch (error) {
     localStorage.removeItem(storageKey);
   }
-  refresh();
+  refresh(false);
 
   checkButton.addEventListener("click", async () => {
     checkButton.disabled = true;
     status.textContent = "Checking…";
     try {
+      await pendingSave;
       const response = await fetch(root.dataset.checkUrl, {
         method: "POST",
         headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
@@ -907,6 +949,142 @@ function initializeBoknections() {
     } catch (error) {
       status.textContent = error.message;
       refresh();
+    }
+  });
+  document.querySelector("[data-archive-reset]")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await pendingSave;
+      event.target.submit();
+    } catch (error) {
+      status.textContent = error.message;
+    }
+  });
+}
+
+function initializeHiddenBok() {
+  const root = document.querySelector("[data-hidden-bok]");
+  if (!root) return;
+  const form = root.querySelector("[data-hidden-form]");
+  const status = root.querySelector("[data-hidden-status]");
+  const words = Array.from(root.querySelectorAll(".hidden-bok-word"), (word) =>
+    Array.from(word.querySelectorAll("[data-hidden-square]")));
+  const inputs = words.flat();
+  const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  if (!form || !status) return;
+  let timer = null;
+  let pending = Promise.resolve();
+  const values = () => words.map((word) => word.map((input) => input.value));
+  const save = () => {
+    timer = null;
+    const cells = JSON.stringify(values());
+    pending = pending.catch(() => {}).then(async () => {
+      const body = root.dataset.version
+        ? { csrf_token: root.dataset.csrf, version: root.dataset.version, action: "save", cells }
+        : { csrf_token: root.dataset.csrf, state: cells };
+      const response = await fetch(root.dataset.progressUrl, {
+        method: "POST", credentials: "same-origin", keepalive: true,
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams(body),
+      });
+      if (!response.ok) throw new Error("Could not save your answer.");
+    });
+    pending.catch((error) => { status.textContent = error.message; });
+  };
+  const scheduleSave = () => {
+    clearTimeout(timer);
+    timer = setTimeout(save, 600);
+  };
+  const putCharacters = (start, text) => {
+    const characters = Array.from(segmenter.segment(text), (part) => part.segment)
+      .filter((character) => !/^\s+$/u.test(character));
+    if (!characters.length) {
+      inputs[start].value = "";
+      scheduleSave();
+      return;
+    }
+    let position = start;
+    characters.forEach((character) => {
+      if (position < inputs.length) inputs[position++].value = character;
+    });
+    const next = inputs[Math.min(position, inputs.length - 1)];
+    next.focus();
+    next.select();
+    scheduleSave();
+  };
+  inputs.forEach((input, index) => {
+    input.addEventListener("focus", () => input.select());
+    input.addEventListener("click", () => input.select());
+    input.addEventListener("input", (event) => {
+      if (!event.isComposing) {
+        putCharacters(index, event.inputType === "insertText" && event.data !== null
+          ? event.data : input.value);
+      }
+    });
+    input.addEventListener("compositionend", () => putCharacters(index, input.value));
+    input.addEventListener("paste", (event) => {
+      event.preventDefault();
+      putCharacters(index, event.clipboardData.getData("text"));
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.isComposing) return;
+      if (event.key === " ") {
+        event.preventDefault();
+      } else if (event.key === "ArrowLeft" && index > 0) {
+        event.preventDefault();
+        inputs[index - 1].focus();
+      } else if (event.key === "ArrowRight" && index < inputs.length - 1) {
+        event.preventDefault();
+        inputs[index + 1].focus();
+      } else if (event.key === "Backspace" && !input.value && index > 0) {
+        event.preventDefault();
+        inputs[index - 1].value = "";
+        inputs[index - 1].focus();
+        scheduleSave();
+      }
+    });
+  });
+  window.addEventListener("pagehide", () => {
+    if (timer !== null) { clearTimeout(timer); timer = null; save(); }
+  });
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    clearTimeout(timer);
+    timer = null;
+    const button = form.querySelector("button");
+    button.disabled = true;
+    try {
+      await pending;
+      if (inputs.some((input) => !input.value)) {
+        save();
+        status.textContent = "Fill every box before checking.";
+        return;
+      }
+      const response = await fetch(root.dataset.checkUrl, {
+        method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ csrf_token: root.dataset.csrf, version: root.dataset.version ?? "",
+          action: "check", cells: JSON.stringify(values()) }),
+      });
+      if (!response.ok) throw new Error("Could not check your answer.");
+      const result = await response.json();
+      if (result.solved) window.location.reload();
+      else status.textContent = "Not quite. Try again.";
+    } catch (error) {
+      status.textContent = error.message;
+    } finally {
+      button.disabled = false;
+    }
+  });
+  document.querySelector("[data-archive-reset]")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    clearTimeout(timer);
+    timer = null;
+    try {
+      await pending;
+      event.target.submit();
+    } catch (error) {
+      status.textContent = error.message;
     }
   });
 }
@@ -1169,6 +1347,7 @@ initializeUserPagination();
 initializeAdminCrossword();
 initializeCrosswordSolver();
 initializeBoknections();
+initializeHiddenBok();
 initializeAdminSearch();
 initializeScoreAdminSearch();
 initializeWordCells();

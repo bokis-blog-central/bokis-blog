@@ -32,7 +32,7 @@
 <div class="wrap home-sections">
   <section class="bokword" aria-labelledby="bokword-title">
     <h2 class="section-title" id="bokword-title">Solve the Weekly Bokword for a star next to your name</h2>
-    <p class="help">or visit the <a href="{{ url_for('bokword_archive') }}">bokword archive</a> to practice</p>
+    <p class="help">or visit the <a href="{{ url_for('bokword_archive') }}">game archive</a> to play old puzzles</p>
     {% if crossword %}
       <div class="bokword-board" data-crossword-board
            data-progress-url="{{ url_for('save_crossword_progress') }}"
@@ -132,40 +132,18 @@
 
   {% if bokopsaraki %}
     <section class="boknections" id="bokopsaraki" aria-labelledby="fish-title">
-      <h2 class="section-title" id="fish-title">ΜΠΟΚΟΨΑΡΑΚΙΑ</h2>
+      <h2 class="section-title" id="fish-title">Hidden Bok</h2>
       {% if bokopsaraki.puzzle %}
-        <p class="help">Reach the destination word by changing one letter at a time. Every step must be a real word, some slang included. All capitals, all accents are ignored. Solve for a red 🟘 by your name</p>
-        <p>Destination: <strong>{{ bokopsaraki.puzzle.end_word|upper }}</strong></p>
-        <div class="word-grid crossword-grid" style="--columns: {{ bokopsaraki.puzzle.start_word|length }}" aria-label="Word ladder">
-          {% for word in [bokopsaraki.puzzle.start_word] + bokopsaraki.history %}
-            {% for letter in word %}<span class="crossword-square" aria-label="{{ letter|upper }}">{{ letter|upper }}</span>{% endfor %}
-          {% endfor %}
-          {% if bokopsaraki.current != bokopsaraki.puzzle.end_word %}
-            {% for letter in bokopsaraki.current %}
-              <label class="crossword-square">
-                <span class="sr">Next word, letter {{ loop.index }}</span>
-                <input form="fish-play-form" name="word_letter" type="text" maxlength="1" autocomplete="off" required data-word-cell>
-              </label>
-            {% endfor %}
-          {% endif %}
-        </div>
-        {% if bokopsaraki.solved %}
-          <p role="status">Solved! You earned a red 🟘 by your name.</p>
-        {% endif %}
-        <div class="word-game-actions">
-          <form id="fish-play-form" method="post" action="{{ url_for('play_bokopsaraki') }}">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="version" value="{{ bokopsaraki.puzzle.version }}">
-            <input type="hidden" name="action" value="guess">
-            <button class="button" type="submit" {% if bokopsaraki.current == bokopsaraki.puzzle.end_word %}disabled{% endif %}>Enter word</button>
-          </form>
-          <form method="post" action="{{ url_for('play_bokopsaraki') }}">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="version" value="{{ bokopsaraki.puzzle.version }}">
-            <input type="hidden" name="action" value="reset">
-            <button class="button secondary" type="submit">Restart</button>
-          </form>
-        </div>
+        <p class="help">Use the hint to find the answer. Case and spacing are ignored. Solve it for a red 🟘 by your name.</p>
+        {% set shape = bokopsaraki.shape %}
+        {% set hint = bokopsaraki.puzzle.hint %}
+        {% set answer = bokopsaraki.answer %}
+        {% set cells = bokopsaraki.cells %}
+        {% set solved = bokopsaraki.solved %}
+        {% set version = bokopsaraki.puzzle.version %}
+        {% set check_url = url_for('play_bokopsaraki') %}
+        {% set progress_url = check_url %}
+        {% include "_hidden_bok_board.html" %}
       {% else %}
         <p class="empty">The next puzzle is being prepared.</p>
       {% endif %}

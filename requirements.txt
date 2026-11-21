@@ -1,3 +1,4 @@
 Flask>=3.0
 gunicorn>=23.0; sys_platform != "win32"
 python-dotenv>=1.0
+regex>=2024.0
