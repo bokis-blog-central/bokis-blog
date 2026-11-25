@@ -1,0 +1,6 @@
+<div class="format-toolbar" role="group" aria-label="Text formatting">
+  <button type="button" class="button secondary" data-format-target="{{ format_target }}" data-format-tag="b">Bold</button>
+  {% if format_all %}<button type="button" class="button secondary" data-format-target="{{ format_target }}" data-format-tag="i">Italic</button>{% endif %}
+  <button type="button" class="button secondary" data-format-target="{{ format_target }}" data-format-tag="u">Underline</button>
+  {% if format_all %}<button type="button" class="button secondary" data-format-target="{{ format_target }}" data-format-tag="s">Strike-through</button>{% endif %}
+</div>

@@ -389,6 +389,8 @@ function initializeCrosswordSolver() {
         body: new URLSearchParams({
           csrf_token: board.dataset.csrf,
           answers: JSON.stringify(answers),
+          displayed: JSON.stringify(cells.map((c) => Number(c.dataset.crosswordCell))),
+          version: board.dataset.version ?? "",
         }),
       });
       if (!response.ok) throw new Error("Could not save your answers.");
@@ -583,7 +585,8 @@ function initializeCrosswordSolver() {
     try {
       clearTimeout(saveTimer);
       saveTimer = null;
-      await pendingSave;
+      if (progressUrl) await saveProgress();
+      else await pendingSave;
       const response = await fetch(form.action, {
         method: "POST",
         headers: {
@@ -962,7 +965,53 @@ function initializeBoknections() {
   });
 }
 
+function initializeFormatting() {
+  document.querySelectorAll("[data-format-target]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const input = document.getElementById(button.dataset.formatTarget);
+      if (!input) return;
+      const tag = button.dataset.formatTag;
+      const start = input.selectionStart;
+      const end = input.selectionEnd;
+      const selected = input.value.slice(start, end);
+      input.setRangeText(`[${tag}]${selected}[/${tag}]`, start, end, "select");
+      input.focus();
+      input.setSelectionRange(start + tag.length + 2, start + tag.length + 2 + selected.length);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  });
+}
+
 function initializeHiddenBok() {
+  const hintForm = document.querySelector("[data-hidden-hint-form]");
+  if (hintForm) {
+    hintForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = hintForm.querySelector("button");
+      const choice = hintForm.elements.enabled;
+      const hintStatus = hintForm.querySelector("[data-hidden-hint-status]");
+      button.disabled = true;
+      hintStatus.textContent = "";
+      try {
+        const response = await fetch(hintForm.action, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams(new FormData(hintForm)),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Could not change your hint.");
+        document.querySelector("[data-primary-hint]").hidden = result.enabled;
+        document.querySelector("[data-alternate-hint]").hidden = !result.enabled;
+        choice.value = result.enabled ? "0" : "1";
+        button.textContent = result.enabled ? "Show primary hint" : "Show alternate hint";
+      } catch (error) {
+        hintStatus.textContent = error.message;
+      } finally {
+        button.disabled = false;
+      }
+    });
+  }
   const root = document.querySelector("[data-hidden-bok]");
   if (!root) return;
   const form = root.querySelector("[data-hidden-form]");
@@ -1347,6 +1396,7 @@ initializeUserPagination();
 initializeAdminCrossword();
 initializeCrosswordSolver();
 initializeBoknections();
+initializeFormatting();
 initializeHiddenBok();
 initializeAdminSearch();
 initializeScoreAdminSearch();

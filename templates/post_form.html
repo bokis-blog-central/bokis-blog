@@ -11,8 +11,9 @@
     </div>
     <div class="field-group">
       <label for="body">Post</label>
+      {% set format_target = 'body' %}{% set format_all = false %}{% include "_format_toolbar.html" %}
       <textarea id="body" name="body" rows="16" maxlength="20000" required aria-describedby="body-help">{{ body }}</textarea>
-      <p class="help" id="body-help">Plain text. Leave a blank line between paragraphs.</p>
+      <p class="help" id="body-help">Leave a blank line between paragraphs. Use [b]bold[/b] and [u]underline[/u] for formatting.</p>
     </div>
     <div class="field-group">
       <label for="post-image">Post image</label>

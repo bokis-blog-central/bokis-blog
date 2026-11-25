@@ -12,7 +12,8 @@ A small multi-user blog built with Flask and SQLite.
   4 most liked posts of the last 7 days, and the latest post by an admin.
 - Explore page: search posts (title, text, author) and users, or browse posts and
   users with independent pagination. Posts can be sorted by newest or most liked.
-- Write, edit and delete your own posts. Posts support an image, custom title,
+- Write, edit and delete your own posts. Use the buttons or `[b]bold[/b]` and
+  `[u]underline[/u]` tags in post bodies. Posts support an image, custom title,
   text, background, accent and surface colors, and comments. The site header and
   footer keep their fixed site colors. Admins can also delete posts.
 - Comments support an optional image, threaded replies, and a per-post comment
@@ -29,9 +30,10 @@ A small multi-user blog built with Flask and SQLite.
   transferred only if their own accounts are later deleted. Crossword Across clues are numbered top to
   bottom and Down clues left to right, with separate numbering for each direction.
   Resetting the crossword saves an all-blocked grid, unpublishes the puzzle, and
-  clears solver stars.
+  clears solver stars and saved answers. Editing clues or grid cells preserves
+  saved answers, including answers in temporarily blocked cells.
   Crossword solvers earn a star by their username
-  until the puzzle is changed or reset, and each earned star adds to their
+  until the puzzle is reset, and each earned star adds to their
   cumulative Bokword victories on their profile. Crossword answers accept Latin
   and Greek letters, including accented Greek vowels. Snake words may form
   chains: enter a `~!conn` tag in a connected answer's optional clue to continue
@@ -42,8 +44,12 @@ A small multi-user blog built with Flask and SQLite.
   them. Each user has 10 checks and can check categories one at a time; correct categories lock and reveal their titles.
   Solvers earn a flower by their username and a win on their profile. Saving a new
   puzzle in the admin page resets attempts and flowers but keeps win counts.
-- Hidden Bok: an admin-togglable word or phrase puzzle with a multi-paragraph
-  hint. Answers can include Greek, English, numbers, symbols and emoji; each
+- Hidden Bok: an admin-togglable word or phrase puzzle with two multi-paragraph
+  hints. Admins decide when the alternate hint is available; each player can
+  switch between the hints, with their choice saved to their account.
+  Both support `[b]bold[/b]`, `[i]italic[/i]`, `[u]underline[/u]` and
+  `[s]strike-through[/s]`. The primary hint is saved when the puzzle is archived.
+  Answers can include Greek, English, numbers, symbols and emoji; each
   grapheme has an editable square and spaces separate words. Checking ignores case
   and repeated whitespace but preserves accents. Answers can be up to 500
   characters and hints up to 10,000. Solvers earn a red 🟘 and a cumulative

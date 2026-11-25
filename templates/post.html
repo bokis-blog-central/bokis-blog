@@ -20,7 +20,7 @@
   {% if post.image %}
     <img class="article-image" src="{{ url_for('uploaded_file', filename=post.image) }}" alt="Image for {{ post.title }}">
   {% endif %}
-  <div class="article-body post-content">{{ post.body|paragraphs }}</div>
+  <div class="article-body post-content">{{ post.body|formatted_paragraphs }}</div>
 
   <div class="article-actions">
     {{ like_button(post, url_for('post', post_id=post.id)) }}

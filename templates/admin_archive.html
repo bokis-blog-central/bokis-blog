@@ -128,7 +128,9 @@
         </div>
         <div class="field-group">
           <label for="hidden-archive-hint">Hint</label>
+          {% set format_target = 'hidden-archive-hint' %}{% set format_all = true %}{% include "_format_toolbar.html" %}
           <textarea id="hidden-archive-hint" name="hint" rows="8" maxlength="10000" required></textarea>
+          <p class="help">Use the buttons or [b], [i], [u], and [s] tags to format text.</p>
         </div>
         <div class="field-group">
           <label for="hidden-archive-date">Date cleared (defaults to today)</label>

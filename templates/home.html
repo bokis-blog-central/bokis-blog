@@ -36,6 +36,7 @@
     {% if crossword %}
       <div class="bokword-board" data-crossword-board
            data-progress-url="{{ url_for('save_crossword_progress') }}"
+           data-version="{{ crossword.version }}"
            data-csrf="{{ csrf_token() }}"
            {% if crossword_saved %}data-saved-answers='{{ crossword_saved|tojson }}'{% endif %}>
         {% include "_crossword_board.html" %}
@@ -45,6 +46,7 @@
           {% else %}
             <form class="crossword-solve-form" method="post" action="{{ url_for('solve_crossword') }}" data-crossword-solve-form>
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="version" value="{{ crossword.version }}">
               <input type="hidden" name="guess" value="" data-crossword-guess>
               <button class="button" type="submit">Check answers</button>
               <p class="crossword-status" aria-live="polite" data-crossword-status></p>
@@ -137,6 +139,17 @@
         <p class="help">Use the hint to find the answer. Case and spacing are ignored. Solve it for a red 🟘 by your name.</p>
         {% set shape = bokopsaraki.shape %}
         {% set hint = bokopsaraki.puzzle.hint %}
+        {% if bokopsaraki.puzzle.alternate_hint_available and bokopsaraki.puzzle.alternate_hint %}
+          <form method="post" action="{{ url_for('select_hidden_bok_hint') }}" data-hidden-hint-form class="actions">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="version" value="{{ bokopsaraki.puzzle.version }}">
+            <input type="hidden" name="enabled" value="{{ '0' if bokopsaraki.use_alternate_hint else '1' }}">
+            <button type="submit" class="button secondary">{{ 'Show primary hint' if bokopsaraki.use_alternate_hint else 'Show alternate hint' }}</button>
+            <span class="help" role="status" data-hidden-hint-status></span>
+          </form>
+          {% set alternate_hint = bokopsaraki.puzzle.alternate_hint %}
+          {% set use_alternate_hint = bokopsaraki.use_alternate_hint %}
+        {% endif %}
         {% set answer = bokopsaraki.answer %}
         {% set cells = bokopsaraki.cells %}
         {% set solved = bokopsaraki.solved %}

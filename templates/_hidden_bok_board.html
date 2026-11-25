@@ -1,6 +1,9 @@
 <div data-hidden-bok data-check-url="{{ check_url }}" data-progress-url="{{ progress_url }}"
      data-csrf="{{ csrf_token() }}" {% if version is defined %}data-version="{{ version }}"{% endif %}>
-  <p class="hidden-bok-hint">{{ hint }}</p>
+  <div class="hidden-bok-hint" data-primary-hint {% if use_alternate_hint %}hidden{% endif %}>{{ hint|formatted_paragraphs }}</div>
+  {% if alternate_hint %}
+    <div class="hidden-bok-hint" data-alternate-hint {% if not use_alternate_hint %}hidden{% endif %}>{{ alternate_hint|formatted_paragraphs }}</div>
+  {% endif %}
   <form data-hidden-form>
     <div class="hidden-bok-words" role="group" aria-label="Answer boxes">
       {% for word in cells %}

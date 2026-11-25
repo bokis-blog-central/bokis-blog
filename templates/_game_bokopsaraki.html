@@ -1,6 +1,6 @@
 <section class="admin-block" id="bokopsaraki" aria-labelledby="hidden-bok-admin-title">
   <h2 id="hidden-bok-admin-title">Hidden Bok</h2>
-  <p class="help">Enter any word or phrase and a hint. Case and spacing are ignored when checking. Replacing the puzzle archives it and resets current badges.</p>
+  <p class="help">Enter any word or phrase, a hint, and an optional alternate hint. Changing hints keeps progress; changing the answer archives the puzzle and resets current badges.</p>
   <form method="post" action="{{ url_for('admin_toggle_bokopsaraki') }}" class="stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="enabled" value="{{ '0' if bokopsaraki_enabled else '1' }}">
@@ -11,10 +11,20 @@
     <label for="hidden-answer">Answer</label>
     <input id="hidden-answer" name="answer" type="text" maxlength="500" required value="{{ bokopsaraki.answer if bokopsaraki else '' }}">
     <label for="hidden-hint">Hint</label>
+    {% set format_target = 'hidden-hint' %}{% set format_all = true %}{% include "_format_toolbar.html" %}
     <textarea id="hidden-hint" name="hint" rows="8" maxlength="10000" required>{{ bokopsaraki.hint if bokopsaraki else '' }}</textarea>
+    <label for="hidden-alternate-hint">Alternate hint (optional)</label>
+    {% set format_target = 'hidden-alternate-hint' %}{% include "_format_toolbar.html" %}
+    <textarea id="hidden-alternate-hint" name="alternate_hint" rows="8" maxlength="10000">{{ bokopsaraki.alternate_hint if bokopsaraki else '' }}</textarea>
+    <p class="help">Both hints support [b]bold[/b], [i]italics[/i], [u]underline[/u], and [s]strike-through[/s].</p>
     <button class="button" type="submit">Save puzzle</button>
   </form>
   {% if bokopsaraki %}
+    <form method="post" action="{{ url_for('admin_toggle_hidden_bok_hint') }}" class="actions">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="button secondary" type="submit" {% if not bokopsaraki.alternate_hint %}disabled{% endif %}>{{ 'Make alternate hint unavailable' if bokopsaraki.alternate_hint_available else 'Make alternate hint available' }}</button>
+      <span class="help">Alternate hint is {{ 'available to players' if bokopsaraki.alternate_hint_available else 'unavailable' }}.</span>
+    </form>
     <form method="post" action="{{ url_for('admin_archive_current_hidden_bok') }}" class="actions">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button class="button secondary" type="submit">Add current Hidden Bok to archive</button>

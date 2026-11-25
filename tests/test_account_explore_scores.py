@@ -286,7 +286,7 @@ class AccountExploreScoresTests(unittest.TestCase):
                          (payload["answer"], payload["hint"], ["Player", "Former"], "2024-02-29 12:00:00"))
         self.assertEqual(self.execute("SELECT answer FROM hidden_bok_state"), [("Current",)])
         page = client.get("/hidden-bok-archive/1").get_data(as_text=True)
-        self.assertIn(payload["hint"], page)
+        self.assertIn("<p>First paragraph.</p><p>Second paragraph.</p>", page)
         self.assertNotIn(payload["answer"], page)
         self.assertEqual(page.count("data-hidden-square"), 8)
 
@@ -489,6 +489,135 @@ class AccountExploreScoresTests(unittest.TestCase):
         by_key = {entry["key"]: entry for entry in view}
         self.assertEqual(by_key["A-0-0"]["lengths"], "4")
 
+    def test_post_formatting_escapes_html_and_keeps_plain_comments(self):
+        body = '[b]Bold [u]under[/u][/b]\n\n<script>alert(1)</script>'
+        self.execute("INSERT INTO posts (user_id, title, body) VALUES (?, ?, ?)",
+                     (self.admin_id, "Formatted", body))
+        post_id = self.execute("SELECT id FROM posts WHERE title = 'Formatted'")[0][0]
+        self.execute("INSERT INTO comments (user_id, post_id, body) VALUES (?, ?, ?)",
+                     (self.admin_id, post_id, "[b]plain comment[/b]"))
+        page = self.client.get(f"/post/{post_id}").get_data(as_text=True)
+        self.assertIn("<strong>Bold <u>under</u></strong>", page)
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", page)
+        self.assertIn("[b]plain comment[/b]", page)
+        self.assertIn('data-format-tag="b"', self.client.get("/new").get_data(as_text=True))
+        self.assertEqual(self.blog.excerpt_filter("[b]Bold[/b] text"), "Bold text")
+        self.assertIn("[b]unclosed", str(self.blog.formatted_paragraphs("[b]unclosed")))
+
+    def test_crossword_edits_keep_per_user_inputs_until_reset(self):
+        player = self.add_user("Player")
+        solver = self.add_user("Solver")
+        first = self.blog.app.test_client()
+        second = self.blog.app.test_client()
+        self.login(first, player)
+        self.login(second, solver)
+        def publish(row, clue):
+            grid = "\n".join([row + "#" * (15 - len(row))] + ["#" * 15] * 14)
+            return self.post(self.client, "/admin/crossword", grid=grid,
+                             clues=json.dumps({"A-0-0": clue}))
+
+        publish("ABC", "Clue")
+        self.post(first, "/crossword/progress", version="1", answers=json.dumps({"0": "A", "1": "B", "2": "C"}))
+        guess = "ABC" + "#" * 222
+        response = second.post("/crossword/solve", data={"csrf_token": "test-csrf",
+                               "version": "1", "guess": guess}, headers={"Accept": "application/json"})
+        self.assertTrue(response.json["solved"])
+        publish("AB#", "Revised")
+        self.assertEqual(self.execute("SELECT version FROM crossword_state"), [(1,)])
+        self.assertIn('"2": "C"', first.get("/").get_data(as_text=True))
+        self.assertIn('"2": "C"', second.get("/").get_data(as_text=True))
+        revised = "AB" + "#" * 223
+        response = second.post("/crossword/solve", data={"csrf_token": "test-csrf",
+                               "version": "1", "guess": revised}, headers={"Accept": "application/json"})
+        self.assertTrue(response.json["solved"])
+        self.assertEqual(self.execute("SELECT bokword_victories FROM users WHERE id = ?", (solver,)), [(1,)])
+        self.post(first, "/crossword/progress", version="1", answers=json.dumps({"0": "A"}))
+        stored = json.loads(self.execute("SELECT answers FROM crossword_progress WHERE user_id = ?", (player,))[0][0])
+        self.assertEqual(stored, {"0": "A", "2": "C"})
+        publish("ABC", "Restored")
+        self.assertIn('"2": "C"', first.get("/").get_data(as_text=True))
+        self.post(first, "/crossword/progress", version="1", answers='{"0":"A"}', displayed="[0, 1]")
+        self.assertEqual(json.loads(self.execute(
+            "SELECT answers FROM crossword_progress WHERE user_id = ?", (player,))[0][0]),
+            {"0": "A", "2": "C"})
+        self.assertEqual(self.execute("SELECT bokword_victories FROM users WHERE id = ?", (solver,)), [(1,)])
+        self.post(self.client, "/admin/crossword/reset")
+        self.assertFalse(self.execute("SELECT * FROM crossword_progress"))
+        publish("ABC", "New")
+        self.assertEqual(self.post(first, "/crossword/progress", version="1", answers='{"0":"A"}').status_code, 409)
+        self.assertEqual(self.post(second, "/crossword/solve", version="1", guess=guess).status_code, 409)
+
+    def test_crossword_edit_preserves_legacy_completed_guess(self):
+        solver = self.add_user("LegacySolver", word=1)
+        grid = "\n".join(["ABC" + "#" * 12] + ["#" * 15] * 14)
+        self.post(self.client, "/admin/crossword", grid=grid, clues='{"A-0-0":"Clue"}')
+        self.execute("INSERT INTO crossword_completions (user_id, puzzle_version) VALUES (?, 1)", (solver,))
+        changed = "\n".join(["ABD" + "#" * 12] + ["#" * 15] * 14)
+        self.post(self.client, "/admin/crossword", grid=changed, clues='{"A-0-0":"Clue"}')
+        client = self.blog.app.test_client()
+        self.login(client, solver)
+        page = client.get("/").get_data(as_text=True)
+        self.assertIn('"2": "C"', page)
+        self.assertIn("Check answers", page)
+
+    def test_hidden_bok_players_choose_available_hint_independently(self):
+        player = self.add_user("Player")
+        other_player = self.add_user("OtherPlayer")
+        client = self.blog.app.test_client()
+        other = self.blog.app.test_client()
+        self.login(client, player)
+        self.login(other, other_player)
+        primary = "[b]First[/b] [u]hint[/u]"
+        alternate = "[i]Second[/i] [s]hint[/s] <script>bad</script>"
+        self.post(self.client, "/admin/bokopsaraki", answer="Answer", hint=primary, alternate_hint=alternate)
+        self.post(self.client, "/admin/bokopsaraki/toggle", enabled="1")
+        self.post(client, "/bokopsaraki/play", version="1", action="save", answer="An")
+        page = client.get("/").get_data(as_text=True)
+        self.assertIn("<strong>First</strong> <u>hint</u>", page)
+        self.assertNotIn("<em>Second</em>", page)
+        self.assertNotIn("data-hidden-hint-form", page)
+        self.assertEqual(self.post(client, "/hidden-bok/hint", version="1", enabled="1").status_code, 409)
+        self.assertEqual(self.post(client, "/admin/hidden-bok/hint").status_code, 403)
+        self.post(self.client, "/admin/hidden-bok/hint")
+        page = client.get("/").get_data(as_text=True)
+        self.assertIn("<em>Second</em> <s>hint</s> &lt;script&gt;bad&lt;/script&gt;", page)
+        self.assertRegex(page, r'data-alternate-hint\s+hidden')
+        self.assertEqual(self.post(client, "/hidden-bok/hint", version="1", enabled="1").status_code, 302)
+        page = client.get("/").get_data(as_text=True)
+        self.assertRegex(page, r'data-primary-hint\s+hidden')
+        self.assertRegex(other.get("/").get_data(as_text=True), r'data-alternate-hint\s+hidden')
+        self.assertIn('value="A"', page)
+        self.assertEqual(self.execute("SELECT version FROM hidden_bok_state"), [(1,)])
+        self.post(self.client, "/admin/hidden-bok/hint")
+        page = client.get("/").get_data(as_text=True)
+        self.assertIn("<strong>First</strong>", page)
+        self.assertNotIn("<em>Second</em>", page)
+        self.assertEqual(self.post(client, "/hidden-bok/hint", version="1", enabled="1").status_code, 409)
+        self.post(self.client, "/admin/hidden-bok/hint")
+        self.assertRegex(client.get("/").get_data(as_text=True), r'data-primary-hint\s+hidden')
+        response = client.post("/hidden-bok/hint", data={"csrf_token": "test-csrf",
+                               "version": "1", "enabled": "0"}, headers={"Accept": "application/json"})
+        self.assertEqual(response.json, {"enabled": False})
+        self.assertRegex(client.get("/").get_data(as_text=True), r'data-alternate-hint\s+hidden')
+        self.assertEqual(self.post(client, "/hidden-bok/hint", version="1", enabled="invalid").status_code, 400)
+        self.assertEqual(self.post(client, "/hidden-bok/hint", version="2", enabled="1").status_code, 409)
+        self.post(self.client, "/admin/bokopsaraki", answer="Answer", hint="Changed", alternate_hint=alternate)
+        self.assertEqual(self.execute("SELECT version FROM hidden_bok_state"), [(1,)])
+        self.assertTrue(self.execute("SELECT * FROM hidden_bok_progress WHERE user_id = ?", (player,)))
+        self.post(self.client, "/admin/bokopsaraki", answer="Next", hint="Next clue")
+        self.assertEqual(self.execute("SELECT hint FROM hidden_bok_archive"), [("Changed",)])
+        self.assertIn("<p>Changed</p>", client.get("/hidden-bok-archive/1").get_data(as_text=True))
+
+    def test_hidden_bok_migrates_existing_hint_availability(self):
+        self.execute("ALTER TABLE hidden_bok_state ADD COLUMN show_alternate_hint INTEGER NOT NULL DEFAULT 0")
+        self.execute("ALTER TABLE hidden_bok_state DROP COLUMN alternate_hint_available")
+        self.execute("INSERT INTO hidden_bok_state (id, answer, hint, alternate_hint, show_alternate_hint) "
+                     "VALUES (1, 'Answer', 'Primary', 'Alternate', 1)")
+        self.blog._schema_checked.clear()
+        with patch.dict(os.environ, {"SIGNUP_PASSWORD": "test-signup-password"}):
+            self.blog.migrate_db()
+        self.assertEqual(self.execute("SELECT alternate_hint_available FROM hidden_bok_state"), [(1,)])
+
     def test_hidden_bok_unicode_and_archive_lifecycle(self):
         player = self.add_user("Player")
         client = self.blog.app.test_client()
@@ -500,7 +629,7 @@ class AccountExploreScoresTests(unittest.TestCase):
         self.post(self.client, "/admin/bokopsaraki/toggle", enabled="1")
         page = client.get("/").get_data(as_text=True)
         self.assertNotIn(answer, page)
-        self.assertIn(hint.strip(), page)
+        self.assertIn("<p>First paragraph.</p><p>" + ("Long hint. " * 100).strip() + "</p>", page)
         self.assertEqual(page.count("data-hidden-square"), 8)
         self.post(client, "/bokopsaraki/play", version="1", action="save", answer="Γά")
         page = client.get("/").get_data(as_text=True)

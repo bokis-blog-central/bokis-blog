@@ -217,6 +217,8 @@ CREATE TABLE IF NOT EXISTS hidden_bok_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     answer TEXT NOT NULL,
     hint TEXT NOT NULL,
+    alternate_hint TEXT NOT NULL DEFAULT '',
+    alternate_hint_available INTEGER NOT NULL DEFAULT 0,
     version INTEGER NOT NULL DEFAULT 1,
     archive_id INTEGER REFERENCES hidden_bok_archive(id) ON DELETE SET NULL
 );
@@ -271,6 +273,7 @@ def migrate_db():
             "profile_text": "TEXT NOT NULL DEFAULT '#2E2836'",
             "boknections_victories": "INTEGER NOT NULL DEFAULT 0",
             "bokopsaraki_victories": "INTEGER NOT NULL DEFAULT 0",
+            "hidden_bok_use_alternate_hint": "INTEGER NOT NULL DEFAULT 0",
             "session_nonce": "TEXT NOT NULL DEFAULT ''",
         },
         "posts": {
@@ -290,6 +293,8 @@ def migrate_db():
         },
         "hidden_bok_state": {
             "archive_id": "INTEGER REFERENCES hidden_bok_archive(id) ON DELETE SET NULL",
+            "alternate_hint": "TEXT NOT NULL DEFAULT ''",
+            "alternate_hint_available": "INTEGER NOT NULL DEFAULT 0",
         },
         "boknections_state": {
             "archive_id": "INTEGER REFERENCES boknections_archive(id) ON DELETE SET NULL",
@@ -306,6 +311,8 @@ def migrate_db():
         for column, definition in columns.items():
             if column not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+                if table == "hidden_bok_state" and column == "alternate_hint_available" and "show_alternate_hint" in existing:
+                    conn.execute("UPDATE hidden_bok_state SET alternate_hint_available = show_alternate_hint")
     if "is_deleted" not in comment_columns:
         conn.execute(
             "UPDATE comments SET is_deleted = 1 WHERE user_id IN "
@@ -615,7 +622,8 @@ def boknections_enabled():
 
 def get_bokopsaraki():
     return db().execute(
-        "SELECT answer, hint, version, archive_id FROM hidden_bok_state WHERE id = 1"
+        "SELECT answer, hint, alternate_hint, alternate_hint_available, version, archive_id "
+        "FROM hidden_bok_state WHERE id = 1"
     ).fetchone()
 
 
@@ -953,7 +961,7 @@ def iso_filter(value):
 
 @app.template_filter("wordcount")
 def wordcount_filter(text):
-    return len(text.split())
+    return len(formatted_inline(text).striptags().split())
 
 
 @app.template_filter("readtime")
@@ -963,7 +971,7 @@ def readtime_filter(text):
 
 @app.template_filter("excerpt")
 def excerpt_filter(text, length=190):
-    flat = " ".join(text.split())
+    flat = " ".join(formatted_inline(text).striptags().split())
     if len(flat) <= length:
         return flat
     return flat[:length].rsplit(" ", 1)[0].rstrip(".,;:!? ") + "..."
@@ -977,6 +985,41 @@ def paragraphs_filter(text):
         "<p>%s</p>" % escape(part.strip()).replace("\n", Markup("<br>"))
         for part in parts if part.strip())
     return Markup(html)
+
+
+FORMAT_TAGS = {"b": "strong", "i": "em", "u": "u", "s": "s"}
+FORMAT_TOKEN_RE = re.compile(r"\[(/?)(b|i|u|s)\]", re.IGNORECASE)
+
+
+def formatted_inline(text):
+    stack = [(None, [])]
+    position = 0
+    for token in FORMAT_TOKEN_RE.finditer(text):
+        stack[-1][1].append(escape(text[position:token.start()]))
+        closing, name = token.group(1), token.group(2).lower()
+        if not closing:
+            stack.append((name, []))
+        elif len(stack) > 1 and stack[-1][0] == name:
+            _, parts = stack.pop()
+            tag = FORMAT_TAGS[name]
+            stack[-1][1].append(Markup("<{0}>").format(tag) + Markup("").join(parts)
+                                + Markup("</{0}>").format(tag))
+        else:
+            stack[-1][1].append(escape(token.group()))
+        position = token.end()
+    stack[-1][1].append(escape(text[position:]))
+    while len(stack) > 1:
+        name, parts = stack.pop()
+        stack[-1][1].append(escape(f"[{name}]") + Markup("").join(parts))
+    return Markup("").join(stack[0][1])
+
+
+@app.template_filter("formatted_paragraphs")
+def formatted_paragraphs(text):
+    parts = re.split(r"\n\s*\n", text.replace("\r\n", "\n").strip())
+    return Markup("").join(
+        Markup("<p>") + formatted_inline(part.strip()).replace("\n", Markup("<br>")) + Markup("</p>")
+        for part in parts if part.strip())
 
 
 GUEST_ENDPOINTS = {None, "static", "home", "login", "logout", "signup",
@@ -1138,9 +1181,11 @@ def home():
             "SELECT guess FROM crossword_completions "
             "WHERE user_id = ? AND puzzle_version = ?",
             (g.user["id"], crossword["version"])).fetchone()
-        crossword_completed = completion is not None
-        if completion:
-            crossword_answers = completion["guess"] or crossword["solution"]
+        guess = completion["guess"] if completion else None
+        crossword_completed = bool(completion and (not guess or (
+            len(guess) == 225 and crossword_match_key(guess) == crossword_match_key(crossword["solution"]))))
+        if crossword_completed:
+            crossword_answers = guess or crossword["solution"]
         else:
             progress = db().execute(
                 "SELECT answers FROM crossword_progress "
@@ -1148,6 +1193,8 @@ def home():
                 (g.user["id"], crossword["version"])).fetchone()
             if progress:
                 crossword_saved = json.loads(progress["answers"])
+            elif guess:
+                crossword_saved = {str(i): char for i, char in enumerate(guess) if char != "#"}
         crossword_entries_list, connected_cells = crossword_view(crossword)
 
     boknections = None
@@ -1171,6 +1218,9 @@ def home():
                 "shape": hidden_bok_shape(puzzle["answer"]),
                 "answer": progress["answer"] if progress else "",
                 "solved": bool(progress["solved"]) if progress else False,
+                "use_alternate_hint": bool(db().execute(
+                    "SELECT hidden_bok_use_alternate_hint FROM users WHERE id = ?",
+                    (g.user["id"],)).fetchone()[0]),
             }
             bokopsaraki["cells"] = (
                 json.loads(progress["cells"]) if progress and progress["cells"] else
@@ -2049,25 +2099,70 @@ def admin_toggle_bokopsaraki():
 @admin_required
 def admin_save_bokopsaraki():
     answer, hint, error = validate_hidden_bok_form(request.form)
+    alternate_hint = request.form.get("alternate_hint", "").strip()
+    if not error and len(alternate_hint) > 10000:
+        error = "The alternate hint must be at most 10000 characters."
     if error:
         flash(error, "error")
         return redirect(url_for("admin") + "#bokopsaraki")
     db().execute("BEGIN IMMEDIATE")
     current = get_bokopsaraki()
     if current is None:
-        db().execute("INSERT INTO hidden_bok_state (id, answer, hint) VALUES (1, ?, ?)",
-                     (answer, hint))
+        db().execute("INSERT INTO hidden_bok_state (id, answer, hint, alternate_hint) VALUES (1, ?, ?, ?)",
+                     (answer, hint, alternate_hint))
         flash("Hidden Bok puzzle saved.", "ok")
-    elif (current["answer"], current["hint"]) != (answer, hint):
+    elif current["answer"] != answer:
         archive_current_hidden_bok(current)
-        db().execute("UPDATE hidden_bok_state SET answer = ?, hint = ?, "
-                     "version = version + 1, archive_id = NULL WHERE id = 1", (answer, hint))
+        db().execute("UPDATE hidden_bok_state SET answer = ?, hint = ?, alternate_hint = ?, "
+                     "alternate_hint_available = 0, version = version + 1, archive_id = NULL WHERE id = 1",
+                     (answer, hint, alternate_hint))
         db().execute("DELETE FROM hidden_bok_progress")
         flash("Hidden Bok puzzle archived and replaced; current badges were reset.", "ok")
+    elif (current["hint"], current["alternate_hint"]) != (hint, alternate_hint):
+        db().execute("UPDATE hidden_bok_state SET hint = ?, alternate_hint = ?, "
+                     "alternate_hint_available = CASE WHEN ? = '' THEN 0 ELSE alternate_hint_available END WHERE id = 1",
+                     (hint, alternate_hint, alternate_hint))
+        flash("Hidden Bok hints updated; progress was kept.", "ok")
     else:
         flash("No Hidden Bok changes to save.", "info")
     db().commit()
     return redirect(url_for("admin") + "#bokopsaraki")
+
+
+@app.post("/admin/hidden-bok/hint")
+@admin_required
+def admin_toggle_hidden_bok_hint():
+    db().execute("BEGIN IMMEDIATE")
+    current = get_bokopsaraki()
+    if current is None or not current["alternate_hint"]:
+        db().rollback()
+        flash("Save an alternate hint before making it available.", "error")
+    else:
+        db().execute("UPDATE hidden_bok_state SET alternate_hint_available = 1 - alternate_hint_available WHERE id = 1")
+        db().commit()
+        flash("Alternate hint availability updated; progress was kept.", "ok")
+    return redirect(url_for("admin") + "#bokopsaraki")
+
+
+@app.post("/hidden-bok/hint")
+@login_required
+def select_hidden_bok_hint():
+    choice = request.form.get("enabled")
+    if choice not in ("0", "1"):
+        abort(400)
+    db().execute("BEGIN IMMEDIATE")
+    puzzle = get_bokopsaraki()
+    if (get_setting("bokopsaraki_enabled") != "1" or puzzle is None or
+            request.form.get("version", type=int) != puzzle["version"] or
+            not puzzle["alternate_hint_available"] or not puzzle["alternate_hint"]):
+        db().rollback()
+        return jsonify(error="The alternate hint is unavailable; reload the page."), 409
+    db().execute("UPDATE users SET hidden_bok_use_alternate_hint = ? WHERE id = ?",
+                 (int(choice), g.user["id"]))
+    db().commit()
+    if request.accept_mimetypes.best == "application/json":
+        return jsonify(enabled=choice == "1")
+    return redirect(url_for("home") + "#bokopsaraki")
 
 
 @app.post("/bokopsaraki/play")
@@ -2149,6 +2244,7 @@ def admin_save_crossword():
         return games_redirect("#crossword")
 
     serialized_clues = json.dumps(clues, ensure_ascii=False, sort_keys=True)
+    db().execute("BEGIN IMMEDIATE")
     state = db().execute(
         "SELECT solution, clues, version FROM crossword_state WHERE id = 1"
     ).fetchone()
@@ -2158,13 +2254,23 @@ def admin_save_crossword():
             "VALUES (1, ?, ?, 1)", (solution, serialized_clues))
         flash("Weekly Bokword puzzle published.", "ok")
     elif state["solution"] != solution or state["clues"] != serialized_clues:
+        for completion in db().execute(
+                "SELECT user_id, guess FROM crossword_completions WHERE puzzle_version = ?",
+                (state["version"],)).fetchall():
+            saved_guess = completion["guess"] or state["solution"]
+            answers = {str(i): char for i, char in enumerate(saved_guess) if char != "#"}
+            db().execute(
+                "INSERT OR IGNORE INTO crossword_progress (user_id, puzzle_version, answers) VALUES (?, ?, ?)",
+                (completion["user_id"], state["version"], json.dumps(answers, ensure_ascii=False)))
+            if not completion["guess"]:
+                db().execute(
+                    "UPDATE crossword_completions SET guess = ? WHERE user_id = ? AND puzzle_version = ?",
+                    (saved_guess, completion["user_id"], state["version"]))
         db().execute(
-            "UPDATE crossword_state SET solution = ?, clues = ?, version = version + 1, "
+            "UPDATE crossword_state SET solution = ?, clues = ?, "
             "updated_at = datetime('now') WHERE id = 1",
             (solution, serialized_clues))
-        db().execute("DELETE FROM crossword_completions")
-        db().execute("DELETE FROM crossword_progress")
-        flash("Weekly Bokword puzzle updated; previous stars were reset.", "ok")
+        flash("Weekly Bokword puzzle updated; saved answers and stars were kept.", "ok")
     else:
         flash("No crossword changes to save.", "info")
     db().commit()
@@ -2174,6 +2280,7 @@ def admin_save_crossword():
 @app.post("/admin/crossword/reset")
 @game_author_required("bokword")
 def admin_reset_crossword():
+    db().execute("BEGIN IMMEDIATE")
     state = db().execute(
         "SELECT version FROM crossword_state WHERE id = 1"
     ).fetchone()
@@ -2252,16 +2359,30 @@ def admin_archive_current_hidden_bok():
 @app.post("/crossword/progress")
 @login_required
 def save_crossword_progress():
+    db().execute("BEGIN IMMEDIATE")
     crossword = get_crossword()
     if crossword is None:
         abort(404)
+    if request.form.get("version", type=int) != crossword["version"]:
+        return jsonify(error="The Bokword was reset; reload the page."), 409
     try:
         raw = json.loads(request.form.get("answers", "{}"))
+        displayed = json.loads(request.form.get("displayed", "null"))
     except ValueError:
         abort(400)
-    if not isinstance(raw, dict):
+    if not isinstance(raw, dict) or (displayed is not None and
+            (not isinstance(displayed, list) or any(
+                type(index) is not int or not 0 <= index < 225 for index in displayed))):
         abort(400)
-    answers = {}
+    existing = db().execute(
+        "SELECT answers FROM crossword_progress WHERE user_id = ? AND puzzle_version = ?",
+        (g.user["id"], crossword["version"])).fetchone()
+    answers = json.loads(existing["answers"]) if existing else {}
+    indices = range(225) if displayed is None else displayed
+    for index in indices:
+        char = crossword["solution"][index]
+        if char != "#":
+            answers.pop(str(index), None)
     for key, value in raw.items():
         if not (key.isdigit() and 0 <= int(key) < 225 and isinstance(value, str)):
             continue
@@ -2281,9 +2402,12 @@ def save_crossword_progress():
 @app.post("/crossword/solve")
 @login_required
 def solve_crossword():
+    db().execute("BEGIN IMMEDIATE")
     crossword = get_crossword()
     if crossword is None:
         abort(404)
+    if request.form.get("version", type=int) != crossword["version"]:
+        return jsonify(error="The Bokword was reset; reload the page."), 409
     guess = normalize_crossword_text(request.form.get("guess", ""))
     solved = len(guess) == 225 and (
         crossword_match_key(guess) == crossword_match_key(crossword["solution"]))
@@ -2296,13 +2420,23 @@ def solve_crossword():
             db().execute(
                 "UPDATE users SET bokword_victories = bokword_victories + 1 "
                 "WHERE id = ?", (g.user["id"],))
-        db().execute("DELETE FROM crossword_progress WHERE user_id = ?",
-                     (g.user["id"],))
+        db().execute(
+            "UPDATE crossword_completions SET guess = ? WHERE user_id = ? AND puzzle_version = ?",
+            (guess, g.user["id"], crossword["version"]))
+        existing = db().execute("SELECT answers FROM crossword_progress WHERE user_id = ? AND puzzle_version = ?",
+                                (g.user["id"], crossword["version"])).fetchone()
+        answers = json.loads(existing["answers"]) if existing else {}
+        answers.update({str(i): char for i, char in enumerate(guess) if char != "#"})
+        db().execute(
+            "INSERT INTO crossword_progress (user_id, puzzle_version, answers) VALUES (?, ?, ?) "
+            "ON CONFLICT(user_id) DO UPDATE SET puzzle_version = excluded.puzzle_version, answers = excluded.answers",
+            (g.user["id"], crossword["version"], json.dumps(answers, ensure_ascii=False)))
         db().commit()
     if request.accept_mimetypes.best == "application/json":
         return jsonify(solved=solved)
     if solved:
-        flash("Crossword solved! You earned a star by your name.", "ok")
+        flash("Crossword solved! You earned a star by your name." if award.rowcount
+              else "Crossword solved! Your existing star was kept.", "ok")
     else:
         flash("Not quite yet. Keep trying!", "info")
     return redirect(url_for("home") + "#bokword")
@@ -2634,6 +2768,7 @@ def archive_current_hidden_bok(state):
         entry_id = add_hidden_bok_archive_entry(state["answer"], state["hint"], victors)
         db().execute("UPDATE hidden_bok_state SET archive_id = ? WHERE id = 1", (entry_id,))
     else:
+        db().execute("UPDATE hidden_bok_archive SET hint = ? WHERE id = ?", (state["hint"], state["archive_id"]))
         merge_archive_victors("hidden_bok_archive", state["archive_id"], victors)
 
 
